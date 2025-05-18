@@ -130,6 +130,12 @@ fn parse(src: &str) -> midly::Smf {
                     position = position.saturating_add(ticks as usize);
                 }
             }
+            MeasureItem::Backup(backup) => {
+                let duration: f64 = backup.duration.parse().unwrap();
+
+                let ticks = (duration / divisions) * TICKS_PER_QUARTER_NOTE_F64;
+                position = position.saturating_sub(ticks as usize)
+            }
             MeasureItem::Print(_) => {}
             MeasureItem::Barline(_) => {}
         }

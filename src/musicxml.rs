@@ -85,6 +85,7 @@ pub enum MeasureItem {
     Attributes(Attributes),
     Note(Note),
     Barline(Barline),
+    Backup(Backup),
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -191,4 +192,11 @@ pub struct Barline {
     #[serde(rename = "@location")]
     pub location: Option<String>,
     pub bar_style: Option<String>,
+}
+
+/// https://w3c.github.io/musicxml/musicxml-reference/elements/backup/
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub struct Backup {
+    pub duration: String,
 }
