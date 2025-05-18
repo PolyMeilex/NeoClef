@@ -1,5 +1,7 @@
 mod musicxml;
 
+use std::collections::BTreeMap;
+
 use musicxml::MeasureItem;
 
 const TICKS_PER_QUARTER_NOTE: u16 = 480;
@@ -23,10 +25,9 @@ fn parse(src: &str) -> midly::Smf {
         .flat_map(|measure| &measure.content);
 
     let mut divisions = 1.0;
-    // Delta time accumulator for rests
-    let mut delta_acc = 0u32;
+    let mut position = 0usize;
 
-    let mut track = vec![];
+    let mut events: BTreeMap<usize, Vec<midly::TrackEvent>> = BTreeMap::new();
 
     while let Some(item) = iter.next() {
         println!("{item:#?}");
@@ -60,8 +61,8 @@ fn parse(src: &str) -> midly::Smf {
                         0, // pitch.alter,
                     );
 
-                    track.push(midly::TrackEvent {
-                        delta: delta_acc.into(),
+                    events.entry(position).or_default().push(midly::TrackEvent {
+                        delta: 0.into(),
                         kind: midly::TrackEventKind::Midi {
                             channel: 0.into(),
                             message: midly::MidiMessage::NoteOn {
@@ -84,7 +85,7 @@ fn parse(src: &str) -> midly::Smf {
                             );
 
                             off.push(pitch);
-                            track.push(midly::TrackEvent {
+                            events.entry(position).or_default().push(midly::TrackEvent {
                                 delta: 0.into(),
                                 kind: midly::TrackEventKind::Midi {
                                     channel: 0.into(),
@@ -99,9 +100,10 @@ fn parse(src: &str) -> midly::Smf {
                         }
                     }
 
-                    // Note-off after 'ticks'
-                    track.push(midly::TrackEvent {
-                        delta: ticks.into(),
+                    position = position.saturating_add(ticks as usize);
+
+                    events.entry(position).or_default().push(midly::TrackEvent {
+                        delta: 0.into(),
                         kind: midly::TrackEventKind::Midi {
                             channel: 0.into(),
                             message: midly::MidiMessage::NoteOff {
@@ -112,7 +114,7 @@ fn parse(src: &str) -> midly::Smf {
                     });
 
                     for pitch in off {
-                        track.push(midly::TrackEvent {
+                        events.entry(position).or_default().push(midly::TrackEvent {
                             delta: 0.into(),
                             kind: midly::TrackEventKind::Midi {
                                 channel: 0.into(),
@@ -123,18 +125,27 @@ fn parse(src: &str) -> midly::Smf {
                             },
                         });
                     }
-
-                    // reset accumulator
-                    delta_acc = 0;
                 } else if note.rest.is_some() {
                     // TODO: is_measure
-
-                    // accumulate rest time
-                    delta_acc = delta_acc.saturating_add(ticks);
+                    position = position.saturating_add(ticks as usize);
                 }
             }
             MeasureItem::Print(_) => {}
             MeasureItem::Barline(_) => {}
+        }
+    }
+
+    let mut track = vec![];
+
+    let mut prev = 0;
+    for (position, events) in events {
+        let mut delta = position - prev;
+        prev = position;
+
+        for mut event in events {
+            event.delta = (delta as u32).into();
+            track.push(event);
+            delta = 0;
         }
     }
 
