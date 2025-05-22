@@ -64,16 +64,24 @@ fn parse(src: &str) -> midly::Smf {
                             .unwrap_or(0),
                     );
 
-                    events.entry(position).or_default().push(midly::TrackEvent {
-                        delta: 0.into(),
-                        kind: midly::TrackEventKind::Midi {
-                            channel: 0.into(),
-                            message: midly::MidiMessage::NoteOn {
-                                key: pitch.into(),
-                                vel: (127 / 2).into(),
+                    let ignore = note
+                        .tie
+                        .as_ref()
+                        .map(|tie| tie.kind == musicxml::StartStop::Stop)
+                        .unwrap_or(false);
+
+                    if !ignore {
+                        events.entry(position).or_default().push(midly::TrackEvent {
+                            delta: 0.into(),
+                            kind: midly::TrackEventKind::Midi {
+                                channel: 0.into(),
+                                message: midly::MidiMessage::NoteOn {
+                                    key: pitch.into(),
+                                    vel: 127.into(),
+                                },
                             },
-                        },
-                    });
+                        });
+                    }
 
                     let mut off = vec![];
                     let mut peek_iter = iter.clone();
@@ -92,16 +100,25 @@ fn parse(src: &str) -> midly::Smf {
                             );
 
                             off.push(pitch);
-                            events.entry(position).or_default().push(midly::TrackEvent {
-                                delta: 0.into(),
-                                kind: midly::TrackEventKind::Midi {
-                                    channel: 0.into(),
-                                    message: midly::MidiMessage::NoteOn {
-                                        key: pitch.into(),
-                                        vel: (127 / 2).into(),
+
+                            let ignore = note
+                                .tie
+                                .as_ref()
+                                .map(|tie| tie.kind == musicxml::StartStop::Stop)
+                                .unwrap_or(false);
+
+                            if !ignore {
+                                events.entry(position).or_default().push(midly::TrackEvent {
+                                    delta: 0.into(),
+                                    kind: midly::TrackEventKind::Midi {
+                                        channel: 0.into(),
+                                        message: midly::MidiMessage::NoteOn {
+                                            key: pitch.into(),
+                                            vel: 127.into(),
+                                        },
                                     },
-                                },
-                            });
+                                });
+                            }
                         } else {
                             break;
                         }
@@ -109,16 +126,18 @@ fn parse(src: &str) -> midly::Smf {
 
                     position = position.saturating_add(ticks as usize);
 
-                    events.entry(position).or_default().push(midly::TrackEvent {
-                        delta: 0.into(),
-                        kind: midly::TrackEventKind::Midi {
-                            channel: 0.into(),
-                            message: midly::MidiMessage::NoteOff {
-                                key: pitch.into(),
-                                vel: 0.into(),
+                    if !ignore {
+                        events.entry(position).or_default().push(midly::TrackEvent {
+                            delta: 0.into(),
+                            kind: midly::TrackEventKind::Midi {
+                                channel: 0.into(),
+                                message: midly::MidiMessage::NoteOff {
+                                    key: pitch.into(),
+                                    vel: 0.into(),
+                                },
                             },
-                        },
-                    });
+                        });
+                    }
 
                     for pitch in off {
                         events.entry(position).or_default().push(midly::TrackEvent {

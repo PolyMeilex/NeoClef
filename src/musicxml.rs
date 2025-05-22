@@ -148,6 +148,7 @@ pub struct Clef {
 
 /// https://w3c.github.io/musicxml/musicxml-reference/elements/note/
 #[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
 pub struct Note {
     #[serde(rename = "@attack")]
     pub attack: Option<String>,
@@ -179,9 +180,17 @@ pub struct Note {
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Tie {
     #[serde(rename = "@type")]
-    kind: String,
+    pub kind: StartStop,
     #[serde(rename = "@time-only")]
-    time_only: Option<String>,
+    pub time_only: Option<String>,
+}
+
+/// https://w3c.github.io/musicxml/musicxml-reference/data-types/start-stop/
+#[derive(Debug, Serialize, Deserialize, Clone, Copy, PartialEq, Eq, Hash)]
+#[serde(rename_all = "kebab-case")]
+pub enum StartStop {
+    Start,
+    Stop,
 }
 
 /// https://w3c.github.io/musicxml/musicxml-reference/elements/pitch/
