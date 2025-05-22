@@ -38,13 +38,13 @@ fn parse(src: &str) -> midly::Smf {
                     divisions = d.trim().parse().unwrap();
                 }
 
-                assert_eq!(
-                    attributes.time,
-                    vec![musicxml::Time {
-                        beats: "4".into(),
-                        beat_type: "4".into(),
-                    }],
-                );
+                // assert_eq!(
+                //     attributes.time,
+                //     vec![musicxml::Time {
+                //         beats: "4".into(),
+                //         beat_type: "4".into(),
+                //     }],
+                // );
             }
             MeasureItem::Note(note) => {
                 let duration: f64 = note.duration.parse().unwrap();
@@ -52,13 +52,16 @@ fn parse(src: &str) -> midly::Smf {
                 let ticks = ((duration / divisions) * TICKS_PER_QUARTER_NOTE_F64) as u32;
 
                 if let Some(pitch) = note.pitch.as_ref() {
-                    assert!(pitch.alter.is_none());
                     assert!(note.chord.is_none());
 
                     let pitch = midi_note_number(
                         pitch.step.chars().next().unwrap(),
                         pitch.octave.parse().unwrap(),
-                        0, // pitch.alter,
+                        pitch
+                            .alter
+                            .as_ref()
+                            .map(|a| a.parse().unwrap())
+                            .unwrap_or(0),
                     );
 
                     events.entry(position).or_default().push(midly::TrackEvent {
@@ -67,7 +70,7 @@ fn parse(src: &str) -> midly::Smf {
                             channel: 0.into(),
                             message: midly::MidiMessage::NoteOn {
                                 key: pitch.into(),
-                                vel: 127.into(),
+                                vel: (127 / 2).into(),
                             },
                         },
                     });
@@ -81,7 +84,11 @@ fn parse(src: &str) -> midly::Smf {
                             let pitch = midi_note_number(
                                 pitch.step.chars().next().unwrap(),
                                 pitch.octave.parse().unwrap(),
-                                0, // pitch.alter,
+                                pitch
+                                    .alter
+                                    .as_ref()
+                                    .map(|a| a.parse().unwrap())
+                                    .unwrap_or(0),
                             );
 
                             off.push(pitch);
@@ -91,7 +98,7 @@ fn parse(src: &str) -> midly::Smf {
                                     channel: 0.into(),
                                     message: midly::MidiMessage::NoteOn {
                                         key: pitch.into(),
-                                        vel: 127.into(),
+                                        vel: (127 / 2).into(),
                                     },
                                 },
                             });
@@ -138,6 +145,7 @@ fn parse(src: &str) -> midly::Smf {
             }
             MeasureItem::Print(_) => {}
             MeasureItem::Barline(_) => {}
+            MeasureItem::Direction(_) => {}
         }
     }
 
@@ -164,7 +172,7 @@ fn parse(src: &str) -> midly::Smf {
     }
 }
 
-fn midi_note_number(step: char, octave: u8, alter: u8) -> u8 {
+fn midi_note_number(step: char, octave: u8, alter: i32) -> u8 {
     let base = match step {
         'C' => 0,
         'D' => 2,
@@ -176,7 +184,7 @@ fn midi_note_number(step: char, octave: u8, alter: u8) -> u8 {
         _ => 0,
     };
 
-    (octave + 1) * 12 + base + alter
+    (((octave + 1) * 12 + base) as i32 + alter) as u8
 }
 
 #[cfg(test)]

@@ -86,7 +86,13 @@ pub enum MeasureItem {
     Note(Note),
     Barline(Barline),
     Backup(Backup),
+    Direction(Direction),
 }
+
+/// https://www.w3.org/2021/06/musicxml40/musicxml-reference/elements/direction/
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub struct Direction {}
 
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
@@ -166,6 +172,16 @@ pub struct Note {
     pub kind: Option<String>,
     pub stem: Option<String>,
     pub rest: Option<Rest>,
+    pub tie: Option<Tie>,
+}
+
+/// https://w3c.github.io/musicxml/musicxml-reference/elements/tie/
+#[derive(Debug, Serialize, Deserialize)]
+pub struct Tie {
+    #[serde(rename = "@type")]
+    kind: String,
+    #[serde(rename = "@time-only")]
+    time_only: Option<String>,
 }
 
 /// https://w3c.github.io/musicxml/musicxml-reference/elements/pitch/
