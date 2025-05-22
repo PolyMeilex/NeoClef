@@ -92,7 +92,17 @@ pub enum MeasureItem {
 /// https://www.w3.org/2021/06/musicxml40/musicxml-reference/elements/direction/
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
-pub struct Direction {}
+pub struct Direction {
+    pub sound: Option<Sound>,
+}
+
+/// https://w3c.github.io/musicxml/musicxml-reference/elements/sound/
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub struct Sound {
+    #[serde(rename = "@tempo")]
+    pub tempo: Option<String>,
+}
 
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]

@@ -1,14 +1,31 @@
 mod musicxml;
 
-use std::collections::BTreeMap;
+use std::{collections::BTreeMap, time::Duration};
 
 use musicxml::MeasureItem;
 
 const TICKS_PER_QUARTER_NOTE: u16 = 480;
 const TICKS_PER_QUARTER_NOTE_F64: f64 = TICKS_PER_QUARTER_NOTE as f64;
 
+const MINUTE: Duration = Duration::from_secs(60);
+
+// 1s = 1_000_000µ
+// 1m = 60_000_000µ
+
+// BPM = 60_000_000 / MicrosecondsPerQuarterNote
+// BPM * MicrosecondsPerQuarterNote = 60_000_000
+// MicrosecondsPerQuarterNote = 60_000_000 / BPM
+
 fn main() {
-    let src = std::fs::read_to_string("./schema/1.musicxml").unwrap();
+    // let bytes = std::fs::read("/home/poly/Downloads/ODDTAXI.mid").unwrap();
+    // let smf = midly::Smf::parse(&bytes).unwrap();
+    //
+    // dbg!(smf);
+    //
+    // return;
+
+    // let src = std::fs::read_to_string("./schema/1.musicxml").unwrap();
+    let src = std::fs::read_to_string("./schema/ODDTAXI.musicxml").unwrap();
     let smf = parse(&src);
     smf.save("out.mid").unwrap();
 }
@@ -164,7 +181,24 @@ fn parse(src: &str) -> midly::Smf {
             }
             MeasureItem::Print(_) => {}
             MeasureItem::Barline(_) => {}
-            MeasureItem::Direction(_) => {}
+            MeasureItem::Direction(direction) => {
+                if let Some(sound) = direction.sound.as_ref() {
+                    if let Some(tempo) = sound.tempo.as_ref() {
+                        let tempo: f64 = tempo.parse().unwrap();
+                        let tempo = tempo.round() as u64;
+
+                        let microseconds_per_quarter_note = MINUTE.as_micros() as u64 / tempo;
+                        let microseconds_per_quarter_note = microseconds_per_quarter_note as u32;
+
+                        events.entry(position).or_default().push(midly::TrackEvent {
+                            delta: 0.into(),
+                            kind: midly::TrackEventKind::Meta(midly::MetaMessage::Tempo(
+                                microseconds_per_quarter_note.into(),
+                            )),
+                        });
+                    }
+                }
+            }
         }
     }
 
