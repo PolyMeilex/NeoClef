@@ -304,7 +304,7 @@ pub enum StartStop {
 pub struct Pitch {
     pub step: Step,
     pub alter: Option<Semitones>,
-    pub octave: String,
+    pub octave: Octave,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -428,6 +428,14 @@ mod primitive {
     ///
     /// Spec: https://www.w3.org/2021/06/musicxml40/musicxml-reference/data-types/semitones/
     pub type Semitones = Decimal;
+
+    /// Octaves are represented by the numbers 0 to 9, where 4 indicates the octave started by middle C.
+    /// Minimum allowed value: 0
+    ///
+    /// Maximum allowed value: 9
+    ///
+    /// Spec: https://www.w3.org/2021/06/musicxml40/musicxml-reference/data-types/octave/
+    pub type Octave = u8;
 
     /// The step type represents a step of the diatonic scale, represented using the English letters A through G.
     ///

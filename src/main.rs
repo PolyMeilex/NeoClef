@@ -71,11 +71,8 @@ fn parse(src: &str) -> midly::Smf {
                 if let Some(pitch) = note.pitch.as_ref() {
                     assert!(note.chord.is_none());
 
-                    let pitch = midi_note_number(
-                        pitch.step,
-                        pitch.octave.parse().unwrap(),
-                        pitch.alter.unwrap_or(0.0),
-                    );
+                    let pitch =
+                        midi_note_number(pitch.step, pitch.octave, pitch.alter.unwrap_or(0.0));
 
                     let ignore = note
                         .tie
@@ -104,7 +101,7 @@ fn parse(src: &str) -> midly::Smf {
 
                             let pitch = midi_note_number(
                                 pitch.step,
-                                pitch.octave.parse().unwrap(),
+                                pitch.octave,
                                 pitch.alter.unwrap_or(0.0),
                             );
 
