@@ -72,7 +72,7 @@ fn parse(src: &str) -> midly::Smf {
                     assert!(note.chord.is_none());
 
                     let pitch = midi_note_number(
-                        pitch.step.chars().next().unwrap(),
+                        pitch.step,
                         pitch.octave.parse().unwrap(),
                         pitch
                             .alter
@@ -107,7 +107,7 @@ fn parse(src: &str) -> midly::Smf {
                             iter.next();
 
                             let pitch = midi_note_number(
-                                pitch.step.chars().next().unwrap(),
+                                pitch.step,
                                 pitch.octave.parse().unwrap(),
                                 pitch
                                     .alter
@@ -225,16 +225,16 @@ fn parse(src: &str) -> midly::Smf {
     }
 }
 
-fn midi_note_number(step: char, octave: u8, alter: i32) -> u8 {
+fn midi_note_number(step: musicxml::Step, octave: u8, alter: i32) -> u8 {
+    use musicxml::Step;
     let base = match step {
-        'C' => 0,
-        'D' => 2,
-        'E' => 4,
-        'F' => 5,
-        'G' => 7,
-        'A' => 9,
-        'B' => 11,
-        _ => 0,
+        Step::C => 0,
+        Step::D => 2,
+        Step::E => 4,
+        Step::F => 5,
+        Step::G => 7,
+        Step::A => 9,
+        Step::B => 11,
     };
 
     (((octave + 1) * 12 + base) as i32 + alter) as u8
