@@ -74,11 +74,7 @@ fn parse(src: &str) -> midly::Smf {
                     let pitch = midi_note_number(
                         pitch.step,
                         pitch.octave.parse().unwrap(),
-                        pitch
-                            .alter
-                            .as_ref()
-                            .map(|a| a.parse().unwrap())
-                            .unwrap_or(0),
+                        pitch.alter.unwrap_or(0.0),
                     );
 
                     let ignore = note
@@ -109,11 +105,7 @@ fn parse(src: &str) -> midly::Smf {
                             let pitch = midi_note_number(
                                 pitch.step,
                                 pitch.octave.parse().unwrap(),
-                                pitch
-                                    .alter
-                                    .as_ref()
-                                    .map(|a| a.parse().unwrap())
-                                    .unwrap_or(0),
+                                pitch.alter.unwrap_or(0.0),
                             );
 
                             off.push(pitch);
@@ -225,7 +217,7 @@ fn parse(src: &str) -> midly::Smf {
     }
 }
 
-fn midi_note_number(step: musicxml::Step, octave: u8, alter: i32) -> u8 {
+fn midi_note_number(step: musicxml::Step, octave: u8, alter: f64) -> u8 {
     use musicxml::Step;
     let base = match step {
         Step::C => 0,
@@ -236,6 +228,9 @@ fn midi_note_number(step: musicxml::Step, octave: u8, alter: i32) -> u8 {
         Step::A => 9,
         Step::B => 11,
     };
+
+    // No microtones for now
+    let alter = alter.round() as i32;
 
     (((octave + 1) * 12 + base) as i32 + alter) as u8
 }

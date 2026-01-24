@@ -303,7 +303,7 @@ pub enum StartStop {
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Pitch {
     pub step: Step,
-    pub alter: Option<String>,
+    pub alter: Option<Semitones>,
     pub octave: String,
 }
 
@@ -421,6 +421,13 @@ mod primitive {
     ///
     /// Spec: https://www.w3.org/2021/06/musicxml40/musicxml-reference/data-types/string-number/
     pub type StringNumber = u32;
+
+    /// The semitones type is a number representing semitones, used for chromatic alteration.
+    /// A value of -1 corresponds to a flat and a value of 1 to a sharp.
+    /// Decimal values like 0.5 (quarter tone sharp) are used for microtones.
+    ///
+    /// Spec: https://www.w3.org/2021/06/musicxml40/musicxml-reference/data-types/semitones/
+    pub type Semitones = Decimal;
 
     /// The step type represents a step of the diatonic scale, represented using the English letters A through G.
     ///
