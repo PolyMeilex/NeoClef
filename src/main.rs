@@ -244,8 +244,7 @@ fn midi_note_number(step: char, octave: u8, alter: i32) -> u8 {
 mod tests {
     use super::*;
 
-    // This is for xml, but html! ident has html syntax highlighting defined
-    macro_rules! html {
+    macro_rules! xml {
         ( $($t:tt)* ) => {
             stringify!($($t)*)
         };
@@ -253,7 +252,7 @@ mod tests {
 
     #[test]
     fn test_name() {
-        let src = html!(
+        let src = xml!(
             <score-partwise version="4.0">
               <part-list>
                 <score-part id="P1">
@@ -328,7 +327,7 @@ mod tests {
 
     #[test]
     fn b() {
-        let src = html!(
+        let src = xml!(
         <score-partwise version="4.0">
           <part-list>
             <score-part id="P1">
