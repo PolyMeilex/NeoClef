@@ -1,5 +1,6 @@
 use std::fmt;
 
+use indexmap::IndexMap;
 use serde::{Deserialize, Deserializer, Serialize, de};
 
 /// https://w3c.github.io/musicxml/musicxml-reference/elements/score-partwise/
@@ -85,32 +86,17 @@ pub struct Measure {
 pub enum MeasureItem {
     Print(Print),
     Attributes(Attributes),
-    // #[serde(deserialize_with = "deserialize_data")]
+    #[serde(deserialize_with = "deserialize_data")]
     Note(Note),
     Barline(Barline),
     Backup(Backup),
     Direction(Direction),
 }
 
-#[derive(Deserialize)]
-struct Abc {
-    pub pitch: Option<Pitch>,
-    pub chord: Option<Chord>,
-    pub duration: String,
-    #[serde(flatten)]
-    pub cba: Cba,
-}
-
-#[derive(Deserialize)]
-struct Cba {
-    pub pitch: Option<Pitch>,
-    pub chord: Option<Chord>,
-    pub duration: String,
-}
-
 #[derive(Debug)]
 pub enum NoteKind {
     Grace,
+    GraceCue,
     Cue,
     Regular,
 }
@@ -119,68 +105,52 @@ fn deserialize_data<'de, D>(deserializer: D) -> Result<Note, D::Error>
 where
     D: Deserializer<'de>,
 {
-    struct JsonStringVisitor;
+    pub struct ValueVisitor;
 
-    impl<'de> de::Visitor<'de> for JsonStringVisitor {
-        type Value = ();
+    impl<'de> de::Visitor<'de> for ValueVisitor {
+        type Value = IndexMap<String, serde_value::Value>;
 
-        fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
-            formatter.write_str("a string containing json data")
+        fn expecting(&self, fmt: &mut fmt::Formatter) -> fmt::Result {
+            fmt.write_str("map")
         }
 
-        fn visit_map<A>(self, mut map: A) -> Result<Self::Value, A::Error>
+        fn visit_map<A>(self, mut visitor: A) -> Result<Self::Value, A::Error>
         where
             A: de::MapAccess<'de>,
         {
-            println!("deserialize_map: ");
-
-            let mut attack: Option<String> = None;
-            let mut color: Option<String> = None;
-            let mut default_x: Option<String> = None;
-            let mut default_y: Option<String> = None;
-            let mut dynamics: Option<String> = None;
-            let mut end_dynamics: Option<String> = None;
-
-            while let Some(key) = map.next_key::<String>()? {
-                match key.as_str() {
-                    "@attack" => {
-                        attack = Some(map.next_value()?);
-                    }
-                    "@color" => {
-                        color = Some(map.next_value()?);
-                    }
-                    "@default-x" => {
-                        default_x = Some(map.next_value()?);
-                    }
-                    "@default-y" => {
-                        default_y = Some(map.next_value()?);
-                    }
-                    "@dynamics" => {
-                        dynamics = Some(map.next_value()?);
-                    }
-                    "@end-dynamics" => {
-                        end_dynamics = Some(map.next_value()?);
-                    }
-                    key if key.starts_with("@") => {
-                        map.next_value::<de::IgnoredAny>()?;
-                    }
-                    key => {
-                        map.next_value::<de::IgnoredAny>()?;
-
-                        match key {
-                            "grace" => {}
-                            "clue" => {}
-                            _ => {}
-                        }
-                    }
-                }
+            let mut map = IndexMap::new();
+            while let Some((key, value)) = visitor.next_entry()? {
+                map.insert(key, value);
             }
-
-            Ok(())
+            Ok(map)
         }
     }
 
-    deserializer.deserialize_map(JsonStringVisitor).unwrap();
+    let value = deserializer.deserialize_map(ValueVisitor).unwrap();
+
+    let mut iter = value.keys().skip_while(|key| key.starts_with("@"));
+
+    let note_kind = if let Some(key) = iter.next() {
+        match key.as_str() {
+            "grace" => {
+                if let Some("cue") = iter.next().map(|k| k.as_str()) {
+                    NoteKind::GraceCue
+                } else {
+                    NoteKind::Grace
+                }
+            }
+            "cue" => NoteKind::Cue,
+            _ => NoteKind::Regular,
+        }
+    } else {
+        NoteKind::Regular
+    };
+
+    dbg!(note_kind);
+
+    todo!();
+
+    // deserializer.deserialize_map(JsonStringVisitor).unwrap();
 
     Ok(Note::default())
 }
@@ -334,6 +304,8 @@ pub struct Backup {
 
 pub use primitive::*;
 mod primitive {
+    #![allow(unused)]
+
     use super::*;
 
     pub type Decimal = f64;

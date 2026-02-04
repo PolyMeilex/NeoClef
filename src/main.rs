@@ -446,4 +446,27 @@ mod tests {
         let midi = parse(src);
         insta::assert_debug_snapshot!(midi);
     }
+
+    #[test]
+    fn grace_cue() {
+        let src = xml!(
+        <score-partwise>
+          <part id="P1">
+            <measure>
+              <note>
+                <grace slash="yes"/>
+                <cue/>
+                <pitch><step>D</step><octave>5</octave></pitch>
+              </note>
+            </measure>
+          </part>
+        </score-partwise>
+        );
+
+        let v: musicxml::ScorePartwise = quick_xml::de::from_str(src).unwrap();
+
+        dbg!(v);
+
+        // insta::assert_debug_snapshot!(midi);
+    }
 }
