@@ -1,8 +1,12 @@
+#![allow(clippy::single_match)]
+
 mod musicxml;
 
-use std::{collections::BTreeMap, time::Duration};
+use std::{collections::BTreeMap, str::FromStr, time::Duration};
 
+use log::error;
 use musicxml::MeasureItem;
+use quick_xml::{events::Event, name::QName};
 
 const TICKS_PER_QUARTER_NOTE: u16 = 480;
 const TICKS_PER_QUARTER_NOTE_F64: f64 = TICKS_PER_QUARTER_NOTE as f64;
@@ -17,6 +21,7 @@ const MINUTE: Duration = Duration::from_secs(60);
 // MicrosecondsPerQuarterNote = 60_000_000 / BPM
 
 fn main() {
+    env_logger::init();
     // let bytes = std::fs::read("/home/poly/Downloads/ODDTAXI.mid").unwrap();
     // let smf = midly::Smf::parse(&bytes).unwrap();
     //
@@ -31,6 +36,35 @@ fn main() {
 }
 
 fn parse(src: &str) -> midly::Smf {
+    {
+        let mut reader = quick_xml::Reader::from_str(src);
+
+        loop {
+            match reader.read_event().unwrap() {
+                Event::Start(b) => match b.name().as_ref() {
+                    b"score-partwise" => {
+                        let score = musicxml::ScorePartwise::parse(&mut reader, &b);
+                        dbg!(score);
+                    }
+                    _ => {
+                        todo!();
+                        reader.read_to_end(b.name()).unwrap();
+                    }
+                },
+                Event::End(b) => {
+                    assert_eq!(b.name().as_ref(), b"score-partwise");
+                    break;
+                }
+                Event::Eof => {
+                    break;
+                }
+                _ => {}
+            }
+        }
+
+        std::process::exit(0);
+    }
+
     let v: musicxml::ScorePartwise = quick_xml::de::from_str(src).unwrap();
 
     assert_eq!(v.part.len(), 1);
@@ -52,7 +86,7 @@ fn parse(src: &str) -> midly::Smf {
         match item {
             MeasureItem::Attributes(attributes) => {
                 if let Some(d) = attributes.divisions.as_ref() {
-                    divisions = d.trim().parse().unwrap();
+                    divisions = *d;
                 }
 
                 // assert_eq!(
@@ -163,7 +197,7 @@ fn parse(src: &str) -> midly::Smf {
                 }
             }
             MeasureItem::Backup(backup) => {
-                let duration: f64 = backup.duration.parse().unwrap();
+                let duration: f64 = backup.duration;
 
                 let ticks = (duration / divisions) * TICKS_PER_QUARTER_NOTE_F64;
                 position = position.saturating_sub(ticks as usize)
@@ -232,8 +266,34 @@ fn midi_note_number(step: musicxml::Step, octave: u8, alter: f64) -> u8 {
     (((octave + 1) * 12 + base) as i32 + alter) as u8
 }
 
+type Reader<'a> = quick_xml::reader::Reader<&'a [u8]>;
+
+trait ReaderExt<'b> {
+    fn read_text_and_parse<T: FromStr>(&mut self, end: QName) -> Option<T>
+    where
+        T::Err: std::fmt::Display;
+}
+
+impl<'b> ReaderExt<'b> for quick_xml::reader::Reader<&'b [u8]> {
+    fn read_text_and_parse<T: FromStr>(&mut self, end: QName) -> Option<T>
+    where
+        T::Err: std::fmt::Display,
+    {
+        self.read_text(end)
+            .inspect_err(|err| log::error!("{err}"))
+            .ok()
+            .and_then(|text| {
+                text.parse::<T>()
+                    .inspect_err(|err| log::error!("{err}"))
+                    .ok()
+            })
+    }
+}
+
 #[cfg(test)]
 mod tests {
+    use std::str::FromStr;
+
     use super::*;
 
     macro_rules! xml {
@@ -447,8 +507,10 @@ mod tests {
         insta::assert_debug_snapshot!(midi);
     }
 
-    use quick_xml::events::{BytesEnd, BytesStart, BytesText, Event};
-    type Reader<'a> = quick_xml::reader::Reader<&'a [u8]>;
+    use quick_xml::{
+        events::{BytesEnd, BytesStart, BytesText, Event},
+        name::QName,
+    };
 
     #[derive(thiserror::Error, Debug)]
     pub enum MusicXmlError {
@@ -650,6 +712,8 @@ mod tests {
                             Field::Part => {
                                 part.push(());
                                 expected_field.allow_for_one_more();
+
+                                continue;
                             }
                         }
 

@@ -1,83 +1,127 @@
 use std::fmt;
 
 use indexmap::IndexMap;
+use log::error;
+use quick_xml::{
+    events::{BytesStart, Event},
+    name::QName,
+};
 use serde::{Deserialize, Deserializer, Serialize, de};
 
 /// https://w3c.github.io/musicxml/musicxml-reference/elements/score-partwise/
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub struct ScorePartwise {
-    #[serde(rename = "@version")]
-    pub version: Option<String>,
-    pub identification: Option<Identification>,
-    pub part_list: PartList,
     pub part: Vec<Part>,
 }
 
-/// https://w3c.github.io/musicxml/musicxml-reference/elements/identification/
-#[derive(Debug, Serialize, Deserialize)]
-pub struct Identification {
-    #[serde(default)]
-    pub creator: Vec<Creator>,
-    pub encoding: Option<Encoding>,
+impl ScorePartwise {
+    pub fn parse(reader: &mut Reader, start: &BytesStart) -> Self {
+        let mut part = Vec::new();
+        loop {
+            match dbg!(reader.read_event().unwrap()) {
+                Event::Start(b) => match b.name().as_ref() {
+                    b"part" => {
+                        part.push(Part::parse(reader, &b));
+                    }
+                    _ => {
+                        reader.read_to_end(b.name()).unwrap();
+                    }
+                },
+                Event::End(b) => {
+                    assert_eq!(b.name(), start.name());
+                    break;
+                }
+                Event::Eof => {
+                    error!("Unexpected Eof");
+                    break;
+                }
+                _ => {}
+            }
+        }
+
+        Self { part }
+    }
 }
-
-/// https://w3c.github.io/musicxml/musicxml-reference/elements/creator/
-#[derive(Debug, Serialize, Deserialize)]
-pub struct Creator {}
-
-/// https://w3c.github.io/musicxml/musicxml-reference/elements/encoding/
-#[derive(Debug, Serialize, Deserialize)]
-#[serde(rename_all = "kebab-case")]
-pub struct Encoding {
-    #[serde(default)]
-    pub supports: Vec<Supports>,
-}
-
-/// https://w3c.github.io/musicxml/musicxml-reference/elements/supports/
-#[derive(Debug, Serialize, Deserialize)]
-pub struct Supports {
-    #[serde(rename = "@element")]
-    pub element: String,
-    #[serde(rename = "@type")]
-    pub kind: String,
-    #[serde(rename = "@attribute")]
-    pub attribute: Option<String>,
-    #[serde(rename = "@value")]
-    pub value: Option<String>,
-}
-
-/// https://w3c.github.io/musicxml/musicxml-reference/elements/part-list/
-#[derive(Debug, Serialize, Deserialize)]
-#[serde(rename_all = "kebab-case")]
-pub struct PartList {}
 
 /// https://w3c.github.io/musicxml/musicxml-reference/elements/part-partwise/
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Part {
-    #[serde(rename = "@id")]
-    pub id: String,
     pub measure: Vec<Measure>,
+}
+
+impl Part {
+    pub fn parse(reader: &mut Reader, start: &BytesStart) -> Self {
+        let mut measure = Vec::new();
+        loop {
+            match reader.read_event().unwrap() {
+                Event::Start(b) => match b.name().as_ref() {
+                    b"measure" => {
+                        measure.push(Measure::parse(reader, &b));
+                    }
+                    _ => {
+                        reader.read_to_end(b.name()).unwrap();
+                    }
+                },
+                Event::End(b) => {
+                    assert_eq!(b.name(), start.name());
+                    break;
+                }
+                Event::Eof => todo!(),
+                _ => {}
+            }
+        }
+
+        Self { measure }
+    }
 }
 
 /// https://w3c.github.io/musicxml/musicxml-reference/elements/measure-partwise/
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Measure {
-    #[serde(rename = "@number")]
-    pub number: String,
-    #[serde(rename = "@id")]
-    pub id: Option<String>,
-    #[serde(rename = "@implicit")]
-    pub implicit: Option<String>,
-    #[serde(rename = "@non-controlling")]
-    pub non_controlling: Option<String>,
-    #[serde(rename = "@text")]
-    pub text: Option<String>,
-    #[serde(rename = "@width")]
-    pub width: Option<String>,
-
     #[serde(rename = "$value")]
     pub content: Vec<MeasureItem>,
+}
+
+impl Measure {
+    pub fn parse(reader: &mut Reader, start: &BytesStart) -> Self {
+        let mut content = Vec::new();
+        loop {
+            match reader.read_event().unwrap() {
+                Event::Start(b) => match b.name().as_ref() {
+                    b"print" => {
+                        content.push(MeasureItem::Print(Print::parse(reader, &b)));
+                    }
+                    b"attributes" => {
+                        content.push(MeasureItem::Attributes(Attributes::parse(reader, &b)));
+                    }
+                    // b"note" => {
+                    //     content.push(MeasureItem::Note(todo!()));
+                    // }
+                    b"barline" => {
+                        content.push(MeasureItem::Barline(Barline::parse(reader, &b)));
+                    }
+                    b"backup" => {
+                        content.push(MeasureItem::Backup(Backup::parse(reader, &b)));
+                    }
+                    // b"direction" => {
+                    //     content.push(MeasureItem::Direction(todo!()));
+                    // }
+                    _ => {
+                        reader.read_to_end(b.name()).unwrap();
+                    }
+                },
+                Event::End(b) => {
+                    assert_eq!(b.name(), start.name());
+                    break;
+                }
+                Event::Eof => todo!(),
+                _ => {}
+            }
+        }
+
+        Self { content }
+    }
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -86,73 +130,127 @@ pub struct Measure {
 pub enum MeasureItem {
     Print(Print),
     Attributes(Attributes),
-    #[serde(deserialize_with = "deserialize_data")]
     Note(Note),
     Barline(Barline),
     Backup(Backup),
     Direction(Direction),
 }
 
-#[derive(Debug)]
-pub enum NoteKind {
-    Grace,
-    GraceCue,
-    Cue,
-    Regular,
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub struct Print {}
+
+impl Print {
+    pub fn parse(reader: &mut Reader, start: &BytesStart) -> Self {
+        reader.read_to_end(start.name()).unwrap();
+        Self {}
+    }
 }
 
-fn deserialize_data<'de, D>(deserializer: D) -> Result<Note, D::Error>
-where
-    D: Deserializer<'de>,
-{
-    pub struct ValueVisitor;
+/// https://w3c.github.io/musicxml/musicxml-reference/elements/attributes/
+#[derive(Debug, Serialize, Deserialize)]
+pub struct Attributes {
+    pub divisions: Option<PositiveDivisions>,
+    #[serde(default)]
+    pub key: Vec<Key>,
+    #[serde(default)]
+    pub time: Vec<Time>,
+    #[serde(default)]
+    pub clef: Vec<Clef>,
+}
 
-    impl<'de> de::Visitor<'de> for ValueVisitor {
-        type Value = IndexMap<String, serde_value::Value>;
+impl Attributes {
+    pub fn parse(reader: &mut Reader, start: &BytesStart) -> Self {
+        let mut divisions: Option<PositiveDivisions> = None;
+        let mut key: Vec<Key> = vec![];
+        let mut time: Vec<Time> = vec![];
+        let mut clef: Vec<Clef> = vec![];
 
-        fn expecting(&self, fmt: &mut fmt::Formatter) -> fmt::Result {
-            fmt.write_str("map")
+        loop {
+            match reader.read_event().unwrap() {
+                Event::Start(b) => match b.name().as_ref() {
+                    b"divisions" => {
+                        divisions = reader.read_text_and_parse(b.name());
+                    }
+                    b"key" => {
+                        key.push(Key::parse(reader, &b));
+                    }
+                    b"time" => {
+                        time.push(Time::parse(reader, &b));
+                    }
+                    b"clef" => {
+                        clef.push(Clef::parse(reader, &b));
+                    }
+                    _ => {
+                        reader.read_to_end(b.name()).unwrap();
+                    }
+                },
+                Event::End(b) => {
+                    assert_eq!(b.name(), start.name());
+                    break;
+                }
+                Event::Eof => todo!(),
+                _ => {}
+            }
         }
 
-        fn visit_map<A>(self, mut visitor: A) -> Result<Self::Value, A::Error>
-        where
-            A: de::MapAccess<'de>,
-        {
-            let mut map = IndexMap::new();
-            while let Some((key, value)) = visitor.next_entry()? {
-                map.insert(key, value);
-            }
-            Ok(map)
+        Self {
+            divisions,
+            key,
+            time,
+            clef,
         }
     }
+}
 
-    let value = deserializer.deserialize_map(ValueVisitor).unwrap();
+/// https://w3c.github.io/musicxml/musicxml-reference/elements/barline/
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub struct Barline {}
 
-    let mut iter = value.keys().skip_while(|key| key.starts_with("@"));
+impl Barline {
+    pub fn parse(reader: &mut Reader, start: &BytesStart) -> Self {
+        reader.read_to_end(start.name()).unwrap();
+        Self {}
+    }
+}
 
-    let note_kind = if let Some(key) = iter.next() {
-        match key.as_str() {
-            "grace" => {
-                if let Some("cue") = iter.next().map(|k| k.as_str()) {
-                    NoteKind::GraceCue
-                } else {
-                    NoteKind::Grace
+/// https://w3c.github.io/musicxml/musicxml-reference/elements/backup/
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub struct Backup {
+    pub duration: PositiveDivisions,
+}
+
+impl Backup {
+    pub fn parse(reader: &mut Reader, start: &BytesStart) -> Self {
+        let mut duration: Option<PositiveDivisions> = None;
+
+        loop {
+            match reader.read_event().unwrap() {
+                Event::Start(b) => match b.name().as_ref() {
+                    b"duration" => {
+                        duration = reader.read_text_and_parse(b.name());
+                    }
+                    _ => {
+                        reader.read_to_end(b.name()).unwrap();
+                    }
+                },
+                Event::End(b) => {
+                    assert_eq!(b.name(), start.name());
+                    break;
                 }
+                Event::Eof => todo!(),
+                _ => {}
             }
-            "cue" => NoteKind::Cue,
-            _ => NoteKind::Regular,
         }
-    } else {
-        NoteKind::Regular
-    };
 
-    dbg!(note_kind);
+        let Some(duration) = duration else {
+            todo!("duration missing");
+        };
 
-    todo!();
-
-    // deserializer.deserialize_map(JsonStringVisitor).unwrap();
-
-    Ok(Note::default())
+        Self { duration }
+    }
 }
 
 /// https://www.w3.org/2021/06/musicxml40/musicxml-reference/elements/direction/
@@ -171,42 +269,35 @@ pub struct Sound {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-#[serde(rename_all = "kebab-case")]
-pub struct Print {
-    pub system_layout: SystemLayout,
-}
-
-/// https://w3c.github.io/musicxml/musicxml-reference/elements/system-layout/
-#[derive(Debug, Serialize, Deserialize)]
-#[serde(rename_all = "kebab-case")]
-pub struct SystemLayout {
-    pub system_margins: Option<SystemMargins>,
-    pub top_system_distance: Option<String>,
-}
-
-/// https://w3c.github.io/musicxml/musicxml-reference/elements/system-margins/
-#[derive(Debug, Serialize, Deserialize)]
-#[serde(rename_all = "kebab-case")]
-pub struct SystemMargins {
-    pub left_margin: String,
-    pub right_margin: String,
-}
-
-/// https://w3c.github.io/musicxml/musicxml-reference/elements/attributes/
-#[derive(Debug, Serialize, Deserialize)]
-pub struct Attributes {
-    pub divisions: Option<String>,
-    #[serde(default)]
-    pub key: Vec<Key>,
-    #[serde(default)]
-    pub time: Vec<Time>,
-    #[serde(default)]
-    pub clef: Vec<Clef>,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
 pub struct Key {
     pub fifths: String,
+}
+
+impl Key {
+    pub fn parse(reader: &mut Reader, start: &BytesStart) -> Self {
+        let mut fifths: String = String::new();
+
+        loop {
+            match reader.read_event().unwrap() {
+                Event::Start(b) => match b.name().as_ref() {
+                    b"fifths" => {
+                        fifths = reader.read_text_and_parse(b.name()).unwrap_or_default();
+                    }
+                    _ => {
+                        reader.read_to_end(b.name()).unwrap();
+                    }
+                },
+                Event::End(b) => {
+                    assert_eq!(b.name(), start.name());
+                    break;
+                }
+                Event::Eof => todo!(),
+                _ => {}
+            }
+        }
+
+        Self { fifths }
+    }
 }
 
 #[derive(Debug, Serialize, Deserialize, PartialEq)]
@@ -216,10 +307,72 @@ pub struct Time {
     pub beat_type: String,
 }
 
+impl Time {
+    pub fn parse(reader: &mut Reader, start: &BytesStart) -> Self {
+        let mut beats: String = String::new();
+        let mut beat_type: String = String::new();
+
+        loop {
+            match reader.read_event().unwrap() {
+                Event::Start(b) => match b.name().as_ref() {
+                    b"beats" => {
+                        beats = reader.read_text_and_parse(b.name()).unwrap_or_default();
+                    }
+                    b"beat_type" => {
+                        beat_type = reader.read_text_and_parse(b.name()).unwrap_or_default();
+                    }
+                    _ => {
+                        reader.read_to_end(b.name()).unwrap();
+                    }
+                },
+                Event::End(b) => {
+                    assert_eq!(b.name(), start.name());
+                    break;
+                }
+                Event::Eof => todo!(),
+                _ => {}
+            }
+        }
+
+        Self { beats, beat_type }
+    }
+}
+
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Clef {
     pub sign: String,
     pub line: String,
+}
+
+impl Clef {
+    pub fn parse(reader: &mut Reader, start: &BytesStart) -> Self {
+        let mut sign: String = String::new();
+        let mut line: String = String::new();
+
+        loop {
+            match reader.read_event().unwrap() {
+                Event::Start(b) => match b.name().as_ref() {
+                    b"sign" => {
+                        sign = reader.read_text_and_parse(b.name()).unwrap_or_default();
+                    }
+                    b"line" => {
+                        line = reader.read_text_and_parse(b.name()).unwrap_or_default();
+                    }
+                    _ => {
+                        reader.read_to_end(b.name()).unwrap();
+                    }
+                },
+                Event::End(b) => {
+                    assert_eq!(b.name(), start.name());
+                    break;
+                }
+                Event::Eof => todo!(),
+                _ => {}
+            }
+        }
+
+        Self { sign, line }
+    }
 }
 
 /// https://w3c.github.io/musicxml/musicxml-reference/elements/note/
@@ -286,23 +439,9 @@ pub struct Rest {
     pub measure: Option<String>,
 }
 
-/// https://w3c.github.io/musicxml/musicxml-reference/elements/barline/
-#[derive(Debug, Serialize, Deserialize)]
-#[serde(rename_all = "kebab-case")]
-pub struct Barline {
-    #[serde(rename = "@location")]
-    pub location: Option<String>,
-    pub bar_style: Option<String>,
-}
-
-/// https://w3c.github.io/musicxml/musicxml-reference/elements/backup/
-#[derive(Debug, Serialize, Deserialize)]
-#[serde(rename_all = "kebab-case")]
-pub struct Backup {
-    pub duration: String,
-}
-
 pub use primitive::*;
+
+use crate::{Reader, ReaderExt};
 mod primitive {
     #![allow(unused)]
 
