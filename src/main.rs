@@ -483,28 +483,10 @@ mod tests {
     }
 
     trait ReaderExt<'b> {
-        fn read_significant_event(&mut self) -> Result<Event<'b>>;
         fn read_start(&mut self) -> Result<BytesStart<'b>>;
-        fn read_start_maybe(&mut self) -> Option<BytesStart<'b>>;
-
-        fn read_start_named(&mut self, tag: &[u8]) -> BytesStart<'b> {
-            self.read_start_named_maybe(tag).expect("TODO")
-        }
-        fn read_start_named_maybe(&mut self, tag: &[u8]) -> Option<BytesStart<'b>>;
     }
 
     impl<'b> ReaderExt<'b> for quick_xml::reader::Reader<&'b [u8]> {
-        fn read_significant_event(&mut self) -> Result<Event<'b>> {
-            loop {
-                match self.read_event() {
-                    Ok(e @ Event::Start(_)) => break Ok(e),
-                    Ok(e @ Event::End(_)) => break Ok(e),
-                    Ok(Event::Eof) => break Err(MusicXmlError::Eof),
-                    _ => {}
-                }
-            }
-        }
-
         fn read_start(&mut self) -> Result<BytesStart<'b>> {
             loop {
                 match self.read_event() {
@@ -515,29 +497,6 @@ mod tests {
                 }
             }
         }
-
-        fn read_start_maybe(&mut self) -> Option<BytesStart<'b>> {
-            loop {
-                match self.read_event() {
-                    Ok(Event::Start(e)) => break Some(e),
-                    Ok(Event::End(_)) => break None,
-                    Ok(Event::Eof) => break None,
-                    _ => {}
-                }
-            }
-        }
-
-        fn read_start_named_maybe(&mut self, tag: &[u8]) -> Option<BytesStart<'b>> {
-            let start = self.read_start_maybe()?;
-            if start.name().as_ref() != tag {
-                let got = start.name();
-                let got = std::str::from_utf8(got.as_ref());
-                let expected = std::str::from_utf8(tag);
-                todo!("Got name {got:?} expected {expected:?}");
-            }
-
-            Some(start)
-        }
     }
 
     struct ReadUtils<'a, 'b> {
@@ -545,81 +504,7 @@ mod tests {
         start: &'a mut BytesStart<'b>,
     }
 
-    impl<'a, 'b> ReadUtils<'a, 'b> {
-        fn expect_tag(&mut self, tag: &[u8]) {
-            let mut got = false;
-            self.read_opt(tag, |_reader| {
-                got = true;
-            });
-
-            if got {
-                return;
-            }
-
-            let got = self.start.name();
-            let got = std::str::from_utf8(got.as_ref());
-            let expected = std::str::from_utf8(tag);
-            todo!("Got name {got:?} expected {expected:?}");
-        }
-
-        fn read_opt(&mut self, tag: &[u8], mut cb: impl FnMut(&mut Self)) -> Result<()> {
-            if self.start.name().as_ref() == tag {
-                cb(self);
-                *self.start = self.reader.read_start()?;
-            }
-            Ok(())
-        }
-
-        fn required(&mut self, tag: &[u8], mut cb: impl FnMut(&mut Self)) -> Result<()> {
-            if self.start.name().as_ref() == tag {
-                cb(self);
-                *self.start = self.reader.read_start()?;
-            } else {
-                let got = self.start.name();
-                let got = std::str::from_utf8(got.as_ref());
-                let expected = std::str::from_utf8(tag);
-                todo!("Required tag, Got {got:?} expected {expected:?}");
-            }
-
-            Ok(())
-        }
-
-        fn optional_ignore_children(&mut self, tag: &[u8], mut cb: impl FnMut(&mut Self)) {
-            self.read_opt(tag, |this| {
-                cb(this);
-                this.ignore_children();
-            })
-            .expect("TODO");
-        }
-
-        fn zero_or_more(&mut self, tag: &[u8], mut cb: impl FnMut(&mut Self)) -> Result<()> {
-            while self.start.name().as_ref() == tag {
-                cb(self);
-                *self.start = self.reader.read_start()?;
-            }
-            Ok(())
-        }
-
-        fn one_or_more(&mut self, tag: &[u8], mut cb: impl FnMut(&mut Self)) -> Result<()> {
-            while self.start.name().as_ref() == tag {
-                cb(self);
-                match self.reader.read_significant_event()? {
-                    Event::Start(e) => {
-                        *self.start = e;
-                    }
-                    Event::End(_) => break,
-                    _ => todo!("unreachable"),
-                }
-            }
-            Ok(())
-        }
-
-        fn ignore_children(&mut self) {
-            self.reader
-                .read_to_end(self.start.to_end().name())
-                .expect("TODO");
-        }
-    }
+    impl<'a, 'b> ReadUtils<'a, 'b> {}
 
     #[derive(Debug)]
     pub struct ScorePartwise {
@@ -633,6 +518,65 @@ mod tests {
         pub part: Vec<()>,
     }
 
+    trait State: Sized + 'static + Copy + Ord {
+        const VARIANTS: &[Self];
+        const LAST: Self = Self::VARIANTS[Self::VARIANTS.len() - 1];
+
+        fn from_xml(start: &BytesStart<'_>) -> Option<Self>;
+
+        fn as_usize(&self) -> usize;
+
+        fn next(&self) -> Self {
+            Self::VARIANTS
+                .get(self.as_usize() + 1)
+                .copied()
+                .unwrap_or(Self::LAST)
+        }
+
+        fn previous(&self) -> Self {
+            Self::VARIANTS[self.as_usize() - 1]
+        }
+
+        fn allow_for_one_more(&mut self) {
+            *self = self.previous();
+        }
+
+        fn is_allowed(&self, got: Self) -> bool {
+            got >= *self
+        }
+    }
+
+    macro_rules! gen_state {
+        ($(#[$meta:meta])* $vis:vis enum $name:ident {
+            $($variant:ident),+ $(,)?
+        }) => {
+            $(#[$meta])*
+            $vis enum $name {
+                $($variant),+
+            }
+
+            impl State for $name {
+                const VARIANTS: &[Self] = &[
+                    $( Self::$variant ),+
+                ];
+
+                fn from_xml(start: &BytesStart<'_>) -> Option<Self> {
+                    match start.name().as_ref() {
+                        $(b if {
+                            let kebab = const_str::convert_ascii_case!(kebab, stringify!($variant));
+                            b == kebab.as_bytes()
+                        } => Some(Self::$variant),)+
+                        _ => None,
+                    }
+                }
+
+                fn as_usize(&self) -> usize {
+                    *self as usize
+                }
+            }
+        };
+    }
+
     impl ScorePartwise {
         pub fn parse(reader: &mut Reader) -> Self {
             let mut work = None;
@@ -644,32 +588,19 @@ mod tests {
             let mut part_list = ();
             let mut part = vec![];
 
-            #[derive(Debug, Clone, Copy, Eq, Ord, PartialEq, PartialOrd)]
-            enum Field {
-                Start,
-                Work,
-                MovementNumber,
-                MovementTitle,
-                Identification,
-                Defaults,
-                Credit,
-                PartList,
-                Part,
-            }
-
-            fn field(start: &BytesStart<'_>) -> Option<Field> {
-                match start.name().as_ref() {
-                    b"work" => Some(Field::Work),
-                    b"movement-number" => Some(Field::MovementNumber),
-                    b"movement-title" => Some(Field::MovementTitle),
-                    b"identification" => Some(Field::Identification),
-                    b"defaults" => Some(Field::Defaults),
-                    b"credit" => Some(Field::Credit),
-                    b"part-list" => Some(Field::PartList),
-                    b"part" => Some(Field::Part),
-                    _ => None,
+            gen_state!(
+                #[derive(Debug, Clone, Copy, Eq, Ord, PartialEq, PartialOrd)]
+                enum Field {
+                    Work,
+                    MovementNumber,
+                    MovementTitle,
+                    Identification,
+                    Defaults,
+                    Credit,
+                    PartList,
+                    Part,
                 }
-            }
+            );
 
             assert_eq!(
                 reader.read_start().unwrap().name().as_ref(),
@@ -677,9 +608,9 @@ mod tests {
                 "TODO: Non partwise",
             );
 
-            let mut last_field = Field::Start;
+            let mut expected_field = Field::Work;
 
-            dbg!(last_field);
+            dbg!(expected_field);
 
             loop {
                 let Some(event) = MyEvent::new(reader.read_event().unwrap()) else {
@@ -688,15 +619,12 @@ mod tests {
 
                 match event {
                     MyEvent::Start(b) => {
-                        let field = field(&b).unwrap();
+                        let field = Field::from_xml(&b).unwrap();
 
-                        if field < last_field {
-                            todo!("out of order");
-                        }
-                        last_field = field;
+                        assert!(expected_field.is_allowed(field), "Out of order field");
+                        expected_field = field.next();
 
-                        match last_field {
-                            Field::Start => unreachable!(),
+                        match field {
                             Field::Work => {
                                 work = Some(());
                             }
@@ -714,17 +642,19 @@ mod tests {
                             }
                             Field::Credit => {
                                 credit.push(());
+                                expected_field.allow_for_one_more();
                             }
                             Field::PartList => {
                                 part_list = ();
                             }
                             Field::Part => {
                                 part.push(());
+                                expected_field.allow_for_one_more();
                             }
                         }
 
                         reader.read_to_end(b.name()).unwrap();
-                        dbg!(last_field);
+                        dbg!(expected_field);
                     }
                     MyEvent::End(b) if b.name().as_ref() == b"score-partwise" => break,
                     MyEvent::End(b) => {
@@ -808,6 +738,7 @@ mod tests {
         <score-partwise>
           <work>
           </work>
+          <credit/>
           <credit/>
           <part-list>
           </part-list>
