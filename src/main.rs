@@ -207,7 +207,6 @@ fn parse(src: &str) -> midly::Smf {
             MeasureItem::Direction(direction) => {
                 if let Some(sound) = direction.sound.as_ref() {
                     if let Some(tempo) = sound.tempo.as_ref() {
-                        let tempo: f64 = tempo.parse().unwrap();
                         let tempo = tempo.round() as u64;
 
                         let microseconds_per_quarter_note = MINUTE.as_micros() as u64 / tempo;

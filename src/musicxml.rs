@@ -95,18 +95,18 @@ impl Measure {
                     b"attributes" => {
                         content.push(MeasureItem::Attributes(Attributes::parse(reader, &b)));
                     }
-                    // b"note" => {
-                    //     content.push(MeasureItem::Note(todo!()));
-                    // }
+                    b"note" => {
+                        content.push(MeasureItem::Note(Note::parse(reader, &b)));
+                    }
                     b"barline" => {
                         content.push(MeasureItem::Barline(Barline::parse(reader, &b)));
                     }
                     b"backup" => {
                         content.push(MeasureItem::Backup(Backup::parse(reader, &b)));
                     }
-                    // b"direction" => {
-                    //     content.push(MeasureItem::Direction(todo!()));
-                    // }
+                    b"direction" => {
+                        content.push(MeasureItem::Direction(Direction::parse(reader, &b)));
+                    }
                     _ => {
                         reader.read_to_end(b.name()).unwrap();
                     }
@@ -260,12 +260,59 @@ pub struct Direction {
     pub sound: Option<Sound>,
 }
 
+impl Direction {
+    pub fn parse(reader: &mut Reader, start: &BytesStart) -> Self {
+        let mut sound: Option<Sound> = None;
+
+        loop {
+            match reader.read_event().unwrap() {
+                Event::Start(b) => match b.name().as_ref() {
+                    b"sound" => {
+                        sound = Some(Sound::parse(reader, &b));
+                    }
+                    _ => {
+                        reader.read_to_end(b.name()).unwrap();
+                    }
+                },
+                Event::End(b) => {
+                    assert_eq!(b.name(), start.name());
+                    break;
+                }
+                Event::Eof => todo!(),
+                _ => {}
+            }
+        }
+
+        Self { sound }
+    }
+}
+
 /// https://w3c.github.io/musicxml/musicxml-reference/elements/sound/
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub struct Sound {
     #[serde(rename = "@tempo")]
-    pub tempo: Option<String>,
+    pub tempo: Option<NonNegativeDecimal>,
+}
+
+impl Sound {
+    pub fn parse(reader: &mut Reader, start: &BytesStart) -> Self {
+        // TODO: Shity code
+        let tempo: Option<NonNegativeDecimal> = start
+            .attributes()
+            .filter_map(|res| res.ok())
+            .find(|attr| attr.key.into_inner() == b"tempo")
+            .and_then(|attr| {
+                let attr = std::str::from_utf8(&attr.value)
+                    .inspect_err(|err| error!("{err}"))
+                    .ok()?;
+                attr.parse().inspect_err(|err| error!("{err}")).ok()
+            });
+
+        reader.read_to_end(start.name()).unwrap();
+
+        Self { tempo }
+    }
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -379,18 +426,6 @@ impl Clef {
 #[derive(Default, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub struct Note {
-    #[serde(rename = "@attack")]
-    pub attack: Option<Divisions>,
-    #[serde(rename = "@color")]
-    pub color: Option<String>,
-    #[serde(rename = "@default-x")]
-    pub default_x: Option<Tenths>,
-    #[serde(rename = "@default-y")]
-    pub default_y: Option<Tenths>,
-    #[serde(rename = "@dynamics")]
-    pub dynamics: Option<NonNegativeDecimal>,
-    #[serde(rename = "@end-dynamics")]
-    pub end_dynamics: Option<NonNegativeDecimal>,
     // TODO:
     // ... more attributes
     // ... There are multiple note types
@@ -403,6 +438,42 @@ pub struct Note {
     pub stem: Option<String>,
     pub rest: Option<Rest>,
     pub tie: Option<Tie>,
+}
+
+impl Note {
+    pub fn parse(reader: &mut Reader, start: &BytesStart) -> Self {
+        let mut rest: Option<Rest> = None;
+
+        loop {
+            match reader.read_event().unwrap() {
+                Event::Start(b) => match b.name().as_ref() {
+                    b"rest" => {
+                        rest = Some(Rest::parse(reader, &b));
+                    }
+                    _ => {
+                        reader.read_to_end(b.name()).unwrap();
+                    }
+                },
+                Event::End(b) => {
+                    assert_eq!(b.name(), start.name());
+                    break;
+                }
+                Event::Eof => todo!(),
+                _ => {}
+            }
+        }
+
+        Self {
+            pitch: None,
+            chord: None,
+            duration: todo!(),
+            voice: None,
+            kind: None,
+            stem: None,
+            rest,
+            tie: None,
+        }
+    }
 }
 
 /// https://w3c.github.io/musicxml/musicxml-reference/elements/tie/
@@ -436,7 +507,30 @@ pub struct Chord {}
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Rest {
     #[serde(rename = "@measure")]
-    pub measure: Option<String>,
+    pub measure: bool,
+}
+
+impl Rest {
+    pub fn parse(reader: &mut Reader, start: &BytesStart) -> Self {
+        // TODO: Shity code
+        let measure: bool = start
+            .attributes()
+            .filter_map(|res| res.ok())
+            .find(|attr| attr.key.into_inner() == b"measure")
+            .map(|attr| match attr.value.as_ref() {
+                b"yes" => true,
+                b"no" => false,
+                value => {
+                    error!("Unexpected bool value: {value:?}");
+                    false
+                }
+            })
+            .unwrap_or(false);
+
+        reader.read_to_end(start.name()).unwrap();
+
+        Self { measure }
+    }
 }
 
 pub use primitive::*;
