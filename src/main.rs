@@ -36,15 +36,17 @@ fn main() {
 }
 
 fn parse(src: &str) -> midly::Smf {
-    {
+    let v = {
         let mut reader = quick_xml::Reader::from_str(src);
+        reader.config_mut().trim_text(true);
+        reader.config_mut().expand_empty_elements = true;
 
         loop {
             match reader.read_event().unwrap() {
                 Event::Start(b) => match b.name().as_ref() {
                     b"score-partwise" => {
                         let score = musicxml::ScorePartwise::parse(&mut reader, &b);
-                        dbg!(score);
+                        break score;
                     }
                     _ => {
                         todo!();
@@ -53,19 +55,19 @@ fn parse(src: &str) -> midly::Smf {
                 },
                 Event::End(b) => {
                     assert_eq!(b.name().as_ref(), b"score-partwise");
-                    break;
+                    todo!()
+                    // break;
                 }
                 Event::Eof => {
-                    break;
+                    todo!()
+                    // break;
                 }
                 _ => {}
             }
         }
+    };
 
-        std::process::exit(0);
-    }
-
-    let v: musicxml::ScorePartwise = quick_xml::de::from_str(src).unwrap();
+    // let v: musicxml::ScorePartwise = quick_xml::de::from_str(src).unwrap();
 
     assert_eq!(v.part.len(), 1);
 
@@ -795,74 +797,74 @@ mod tests {
         }
     }
 
-    #[test]
-    fn grace_cue() {
-        let src = xml!(
-        <score-partwise>
-          <work>
-          </work>
-          <credit/>
-          <credit/>
-          <part-list>
-          </part-list>
-          <part id="P1">
-            <measure>
-              <note>
-                <grace slash="yes"/>
-                <cue/>
-                <pitch><step>D</step><octave>5</octave></pitch>
-              </note>
-            </measure>
-          </part>
-          <part id="P1">
-            <measure>
-              <note>
-                <grace slash="yes"/>
-                <cue/>
-                <pitch><step>D</step><octave>5</octave></pitch>
-              </note>
-            </measure>
-          </part>
-        </score-partwise>
-        );
-
-        {
-            let mut reader = Reader::from_str(src);
-            reader.config_mut().trim_text(true);
-            reader.config_mut().expand_empty_elements = true;
-
-            let score = ScorePartwise::parse(&mut reader);
-
-            dbg!(score);
-
-            // reader.read_start_named(b"score-partwise");
-            //
-            // loop {
-            //     match dbg!(reader.read_event()) {
-            //         Err(e) => panic!("Error at position {}: {:?}", reader.error_position(), e),
-            //         // exits the loop when reaching end of file
-            //         Ok(Event::Eof) => break,
-            //
-            //         Ok(Event::Start(e)) => match e.name().as_ref() {
-            //             b"tag1" => println!(
-            //                 "attributes values: {:?}",
-            //                 e.attributes().map(|a| a.unwrap().value).collect::<Vec<_>>()
-            //             ),
-            //             b"tag2" => count += 1,
-            //             _ => (),
-            //         },
-            //         Ok(Event::Text(e)) => txt.push(e.decode().unwrap().into_owned()),
-            //
-            //         // There are several other `Event`s we do not consider here
-            //         _ => (),
-            //     }
-            // }
-        }
-
-        // let v: musicxml::ScorePartwise = quick_xml::de::from_str(src).unwrap();
-        //
-        // dbg!(v);
-
-        // insta::assert_debug_snapshot!(midi);
-    }
+    // #[test]
+    // fn grace_cue() {
+    //     let src = xml!(
+    //     <score-partwise>
+    //       <work>
+    //       </work>
+    //       <credit/>
+    //       <credit/>
+    //       <part-list>
+    //       </part-list>
+    //       <part id="P1">
+    //         <measure>
+    //           <note>
+    //             <grace slash="yes"/>
+    //             <cue/>
+    //             <pitch><step>D</step><octave>5</octave></pitch>
+    //           </note>
+    //         </measure>
+    //       </part>
+    //       <part id="P1">
+    //         <measure>
+    //           <note>
+    //             <grace slash="yes"/>
+    //             <cue/>
+    //             <pitch><step>D</step><octave>5</octave></pitch>
+    //           </note>
+    //         </measure>
+    //       </part>
+    //     </score-partwise>
+    //     );
+    //
+    //     {
+    //         let mut reader = Reader::from_str(src);
+    //         reader.config_mut().trim_text(true);
+    //         reader.config_mut().expand_empty_elements = true;
+    //
+    //         let score = ScorePartwise::parse(&mut reader);
+    //
+    //         dbg!(score);
+    //
+    //         // reader.read_start_named(b"score-partwise");
+    //         //
+    //         // loop {
+    //         //     match dbg!(reader.read_event()) {
+    //         //         Err(e) => panic!("Error at position {}: {:?}", reader.error_position(), e),
+    //         //         // exits the loop when reaching end of file
+    //         //         Ok(Event::Eof) => break,
+    //         //
+    //         //         Ok(Event::Start(e)) => match e.name().as_ref() {
+    //         //             b"tag1" => println!(
+    //         //                 "attributes values: {:?}",
+    //         //                 e.attributes().map(|a| a.unwrap().value).collect::<Vec<_>>()
+    //         //             ),
+    //         //             b"tag2" => count += 1,
+    //         //             _ => (),
+    //         //         },
+    //         //         Ok(Event::Text(e)) => txt.push(e.decode().unwrap().into_owned()),
+    //         //
+    //         //         // There are several other `Event`s we do not consider here
+    //         //         _ => (),
+    //         //     }
+    //         // }
+    //     }
+    //
+    //     // let v: musicxml::ScorePartwise = quick_xml::de::from_str(src).unwrap();
+    //     //
+    //     // dbg!(v);
+    //
+    //     // insta::assert_debug_snapshot!(midi);
+    // }
 }

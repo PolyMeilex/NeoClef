@@ -19,7 +19,7 @@ impl ScorePartwise {
     pub fn parse(reader: &mut Reader, start: &BytesStart) -> Self {
         let mut part = Vec::new();
         loop {
-            match dbg!(reader.read_event().unwrap()) {
+            match reader.read_event().unwrap() {
                 Event::Start(b) => match b.name().as_ref() {
                     b"part" => {
                         part.push(Part::parse(reader, &b));
@@ -365,7 +365,7 @@ impl Time {
                     b"beats" => {
                         beats = reader.read_text_and_parse(b.name()).unwrap_or_default();
                     }
-                    b"beat_type" => {
+                    b"beat-type" => {
                         beat_type = reader.read_text_and_parse(b.name()).unwrap_or_default();
                     }
                     _ => {
@@ -506,8 +506,9 @@ pub struct Chord {}
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Rest {
+    // TODO: not optional
     #[serde(rename = "@measure")]
-    pub measure: bool,
+    pub measure: Option<bool>,
 }
 
 impl Rest {
@@ -529,7 +530,9 @@ impl Rest {
 
         reader.read_to_end(start.name()).unwrap();
 
-        Self { measure }
+        Self {
+            measure: Some(measure),
+        }
     }
 }
 
