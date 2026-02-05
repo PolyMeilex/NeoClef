@@ -385,16 +385,17 @@ impl Time {
     }
 }
 
+/// https://w3c.github.io/musicxml/musicxml-reference/elements/clef/
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Clef {
     pub sign: String,
-    pub line: String,
+    pub line: Option<String>,
 }
 
 impl Clef {
     pub fn parse(reader: &mut Reader, start: &BytesStart) -> Self {
         let mut sign: String = String::new();
-        let mut line: String = String::new();
+        let mut line: Option<String> = None;
 
         loop {
             match reader.read_event().unwrap() {
@@ -403,7 +404,7 @@ impl Clef {
                         sign = reader.read_text_and_parse(b.name()).unwrap_or_default();
                     }
                     b"line" => {
-                        line = reader.read_text_and_parse(b.name()).unwrap_or_default();
+                        line = reader.read_text_and_parse(b.name());
                     }
                     _ => {
                         reader.read_to_end(b.name()).unwrap();
@@ -426,12 +427,9 @@ impl Clef {
 #[derive(Default, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub struct Note {
-    // TODO:
-    // ... more attributes
-    // ... There are multiple note types
     pub pitch: Option<Pitch>,
     pub chord: Option<Chord>,
-    pub duration: String,
+    pub duration: PositiveDivisions,
     pub voice: Option<String>,
     #[serde(rename = "type")]
     pub kind: Option<String>,
@@ -442,13 +440,41 @@ pub struct Note {
 
 impl Note {
     pub fn parse(reader: &mut Reader, start: &BytesStart) -> Self {
+        let mut pitch: Option<Pitch> = None;
+        let mut chord: Option<Chord> = None;
+        let mut duration: Option<PositiveDivisions> = None;
+        let mut voice: Option<String> = None;
+        let mut kind: Option<String> = None;
+        let mut stem: Option<String> = None;
         let mut rest: Option<Rest> = None;
+        let mut tie: Option<Tie> = None;
 
         loop {
             match reader.read_event().unwrap() {
                 Event::Start(b) => match b.name().as_ref() {
+                    b"pitch" => {
+                        pitch = Some(Pitch::parse(reader, &b));
+                    }
+                    b"chord" => {
+                        chord = Some(Chord::parse(reader, &b));
+                    }
+                    b"duration" => {
+                        duration = reader.read_text_and_parse(b.name());
+                    }
+                    b"voice" => {
+                        voice = reader.read_text_and_parse(b.name());
+                    }
+                    b"type" => {
+                        kind = reader.read_text_and_parse(b.name());
+                    }
+                    b"stem" => {
+                        stem = reader.read_text_and_parse(b.name());
+                    }
                     b"rest" => {
                         rest = Some(Rest::parse(reader, &b));
+                    }
+                    b"tie" => {
+                        tie = Some(Tie::parse(reader, &b));
                     }
                     _ => {
                         reader.read_to_end(b.name()).unwrap();
@@ -463,15 +489,19 @@ impl Note {
             }
         }
 
+        let Some(duration) = duration else {
+            todo!("duration missing");
+        };
+
         Self {
-            pitch: None,
-            chord: None,
-            duration: todo!(),
-            voice: None,
-            kind: None,
-            stem: None,
+            pitch,
+            chord,
+            duration,
+            voice,
+            kind,
+            stem,
             rest,
-            tie: None,
+            tie,
         }
     }
 }
@@ -483,6 +513,43 @@ pub struct Tie {
     pub kind: StartStop,
     #[serde(rename = "@time-only")]
     pub time_only: Option<String>,
+}
+
+impl Tie {
+    pub fn parse(reader: &mut Reader, start: &BytesStart) -> Self {
+        let mut kind: Option<StartStop> = None;
+        let mut time_only: Option<String> = None;
+
+        for attr in start.attributes().filter_map(|r| r.ok()) {
+            match attr.key.as_ref() {
+                b"type" => {
+                    kind = match attr.value.as_ref() {
+                        b"start" => Some(StartStop::Start),
+                        b"stop" => Some(StartStop::Stop),
+                        other => {
+                            error!("Unexpected tie type: {other:?}");
+                            None
+                        }
+                    };
+                }
+                b"time-only" => {
+                    if let Ok(s) =
+                        std::str::from_utf8(&attr.value).inspect_err(|e| error!("time-only: {e}"))
+                    {
+                        time_only = Some(s.to_string());
+                    }
+                }
+                _ => {}
+            }
+        }
+
+        reader.read_to_end(start.name()).unwrap();
+
+        Tie {
+            kind: kind.expect("Missing kind"),
+            time_only,
+        }
+    }
 }
 
 /// https://w3c.github.io/musicxml/musicxml-reference/data-types/start-stop/
@@ -501,8 +568,57 @@ pub struct Pitch {
     pub octave: Octave,
 }
 
+impl Pitch {
+    pub fn parse(reader: &mut Reader, start: &BytesStart) -> Self {
+        let mut step: Option<Step> = None;
+        let mut alter: Option<Semitones> = None;
+        let mut octave: Option<Octave> = None;
+
+        loop {
+            match reader.read_event().unwrap() {
+                Event::Start(b) => match b.name().as_ref() {
+                    b"step" => {
+                        step = Step::parse(reader, &b);
+                    }
+                    b"alter" => {
+                        alter = reader.read_text_and_parse(b.name());
+                    }
+                    b"octave" => {
+                        octave = reader.read_text_and_parse(b.name());
+                    }
+                    _ => {
+                        reader.read_to_end(b.name()).unwrap();
+                    }
+                },
+                Event::End(b) => {
+                    assert_eq!(b.name(), start.name());
+                    break;
+                }
+                Event::Eof => todo!(),
+                _ => {}
+            }
+        }
+
+        let step = step.expect("missing step in pitch");
+        let octave = octave.expect("missing octave in pitch");
+
+        Self {
+            step,
+            alter,
+            octave,
+        }
+    }
+}
+
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Chord {}
+
+impl Chord {
+    pub fn parse(reader: &mut Reader, start: &BytesStart) -> Self {
+        reader.read_to_end(start.name()).unwrap();
+        Self {}
+    }
+}
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Rest {
@@ -657,5 +773,27 @@ mod primitive {
         E,
         F,
         G,
+    }
+
+    impl Step {
+        pub fn parse(reader: &mut Reader, start: &BytesStart) -> Option<Self> {
+            let txt = reader.read_text(start.name()).unwrap_or_default();
+
+            let step = match txt.as_ref() {
+                "A" => Step::A,
+                "B" => Step::B,
+                "C" => Step::C,
+                "D" => Step::D,
+                "E" => Step::E,
+                "F" => Step::F,
+                "G" => Step::G,
+                other => {
+                    error!("Unexpected step value: {other}");
+                    return None;
+                }
+            };
+
+            Some(step)
+        }
     }
 }
