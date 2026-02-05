@@ -447,10 +447,379 @@ mod tests {
         insta::assert_debug_snapshot!(midi);
     }
 
+    use quick_xml::events::{BytesEnd, BytesStart, BytesText, Event};
+    type Reader<'a> = quick_xml::reader::Reader<&'a [u8]>;
+
+    #[derive(thiserror::Error, Debug)]
+    pub enum MusicXmlError {
+        #[error("Unexpected end of file")]
+        Eof,
+    }
+
+    type Result<T, E = MusicXmlError> = std::result::Result<T, E>;
+
+    #[derive(Clone, Debug, Eq, PartialEq)]
+    pub enum MyEvent<'a> {
+        /// Start tag (with attributes) `<tag attr="value">`.
+        Start(BytesStart<'a>),
+        /// End tag `</tag>`.
+        End(BytesEnd<'a>),
+        /// Escaped character data between tags.
+        Text(BytesText<'a>),
+        /// End of XML document.
+        Eof,
+    }
+
+    impl<'a> MyEvent<'a> {
+        pub fn new(event: quick_xml::events::Event<'a>) -> Option<Self> {
+            Some(match event {
+                Event::Start(b) => Self::Start(b),
+                Event::End(b) => Self::End(b),
+                Event::Text(b) => Self::Text(b),
+                Event::Eof => Self::Eof,
+                _ => return None,
+            })
+        }
+    }
+
+    trait ReaderExt<'b> {
+        fn read_significant_event(&mut self) -> Result<Event<'b>>;
+        fn read_start(&mut self) -> Result<BytesStart<'b>>;
+        fn read_start_maybe(&mut self) -> Option<BytesStart<'b>>;
+
+        fn read_start_named(&mut self, tag: &[u8]) -> BytesStart<'b> {
+            self.read_start_named_maybe(tag).expect("TODO")
+        }
+        fn read_start_named_maybe(&mut self, tag: &[u8]) -> Option<BytesStart<'b>>;
+    }
+
+    impl<'b> ReaderExt<'b> for quick_xml::reader::Reader<&'b [u8]> {
+        fn read_significant_event(&mut self) -> Result<Event<'b>> {
+            loop {
+                match self.read_event() {
+                    Ok(e @ Event::Start(_)) => break Ok(e),
+                    Ok(e @ Event::End(_)) => break Ok(e),
+                    Ok(Event::Eof) => break Err(MusicXmlError::Eof),
+                    _ => {}
+                }
+            }
+        }
+
+        fn read_start(&mut self) -> Result<BytesStart<'b>> {
+            loop {
+                match self.read_event() {
+                    Ok(Event::Start(e)) => break Ok(e),
+                    Ok(Event::End(_)) => todo!("got end instead of start"),
+                    Ok(Event::Eof) => break Err(MusicXmlError::Eof),
+                    _ => {}
+                }
+            }
+        }
+
+        fn read_start_maybe(&mut self) -> Option<BytesStart<'b>> {
+            loop {
+                match self.read_event() {
+                    Ok(Event::Start(e)) => break Some(e),
+                    Ok(Event::End(_)) => break None,
+                    Ok(Event::Eof) => break None,
+                    _ => {}
+                }
+            }
+        }
+
+        fn read_start_named_maybe(&mut self, tag: &[u8]) -> Option<BytesStart<'b>> {
+            let start = self.read_start_maybe()?;
+            if start.name().as_ref() != tag {
+                let got = start.name();
+                let got = std::str::from_utf8(got.as_ref());
+                let expected = std::str::from_utf8(tag);
+                todo!("Got name {got:?} expected {expected:?}");
+            }
+
+            Some(start)
+        }
+    }
+
+    struct ReadUtils<'a, 'b> {
+        reader: &'a mut Reader<'b>,
+        start: &'a mut BytesStart<'b>,
+    }
+
+    impl<'a, 'b> ReadUtils<'a, 'b> {
+        fn expect_tag(&mut self, tag: &[u8]) {
+            let mut got = false;
+            self.read_opt(tag, |_reader| {
+                got = true;
+            });
+
+            if got {
+                return;
+            }
+
+            let got = self.start.name();
+            let got = std::str::from_utf8(got.as_ref());
+            let expected = std::str::from_utf8(tag);
+            todo!("Got name {got:?} expected {expected:?}");
+        }
+
+        fn read_opt(&mut self, tag: &[u8], mut cb: impl FnMut(&mut Self)) -> Result<()> {
+            if self.start.name().as_ref() == tag {
+                cb(self);
+                *self.start = self.reader.read_start()?;
+            }
+            Ok(())
+        }
+
+        fn required(&mut self, tag: &[u8], mut cb: impl FnMut(&mut Self)) -> Result<()> {
+            if self.start.name().as_ref() == tag {
+                cb(self);
+                *self.start = self.reader.read_start()?;
+            } else {
+                let got = self.start.name();
+                let got = std::str::from_utf8(got.as_ref());
+                let expected = std::str::from_utf8(tag);
+                todo!("Required tag, Got {got:?} expected {expected:?}");
+            }
+
+            Ok(())
+        }
+
+        fn optional_ignore_children(&mut self, tag: &[u8], mut cb: impl FnMut(&mut Self)) {
+            self.read_opt(tag, |this| {
+                cb(this);
+                this.ignore_children();
+            })
+            .expect("TODO");
+        }
+
+        fn zero_or_more(&mut self, tag: &[u8], mut cb: impl FnMut(&mut Self)) -> Result<()> {
+            while self.start.name().as_ref() == tag {
+                cb(self);
+                *self.start = self.reader.read_start()?;
+            }
+            Ok(())
+        }
+
+        fn one_or_more(&mut self, tag: &[u8], mut cb: impl FnMut(&mut Self)) -> Result<()> {
+            while self.start.name().as_ref() == tag {
+                cb(self);
+                match self.reader.read_significant_event()? {
+                    Event::Start(e) => {
+                        *self.start = e;
+                    }
+                    Event::End(_) => break,
+                    _ => todo!("unreachable"),
+                }
+            }
+            Ok(())
+        }
+
+        fn ignore_children(&mut self) {
+            self.reader
+                .read_to_end(self.start.to_end().name())
+                .expect("TODO");
+        }
+    }
+
+    #[derive(Debug)]
+    pub struct ScorePartwise {
+        pub work: Option<()>,
+        pub movement_number: Option<()>,
+        pub movement_title: Option<()>,
+        pub identification: Option<()>,
+        pub defaults: Option<()>,
+        pub credit: Vec<()>,
+        pub part_list: (),
+        pub part: Vec<()>,
+    }
+
+    impl ScorePartwise {
+        pub fn parse(reader: &mut Reader) -> Self {
+            let mut work = None;
+            let mut movement_number = None;
+            let mut movement_title = None;
+            let mut identification = None;
+            let mut defaults = None;
+            let mut credit = vec![];
+            let mut part_list = ();
+            let mut part = vec![];
+
+            #[derive(Debug, Clone, Copy, Eq, Ord, PartialEq, PartialOrd)]
+            enum Field {
+                Start,
+                Work,
+                MovementNumber,
+                MovementTitle,
+                Identification,
+                Defaults,
+                Credit,
+                PartList,
+                Part,
+            }
+
+            fn field(start: &BytesStart<'_>) -> Option<Field> {
+                match start.name().as_ref() {
+                    b"work" => Some(Field::Work),
+                    b"movement-number" => Some(Field::MovementNumber),
+                    b"movement-title" => Some(Field::MovementTitle),
+                    b"identification" => Some(Field::Identification),
+                    b"defaults" => Some(Field::Defaults),
+                    b"credit" => Some(Field::Credit),
+                    b"part-list" => Some(Field::PartList),
+                    b"part" => Some(Field::Part),
+                    _ => None,
+                }
+            }
+
+            assert_eq!(
+                reader.read_start().unwrap().name().as_ref(),
+                b"score-partwise",
+                "TODO: Non partwise",
+            );
+
+            let mut last_field = Field::Start;
+
+            dbg!(last_field);
+
+            loop {
+                let Some(event) = MyEvent::new(reader.read_event().unwrap()) else {
+                    continue;
+                };
+
+                match event {
+                    MyEvent::Start(b) => {
+                        let field = field(&b).unwrap();
+
+                        if field < last_field {
+                            todo!("out of order");
+                        }
+                        last_field = field;
+
+                        match last_field {
+                            Field::Start => unreachable!(),
+                            Field::Work => {
+                                work = Some(());
+                            }
+                            Field::MovementNumber => {
+                                movement_number = Some(());
+                            }
+                            Field::MovementTitle => {
+                                movement_title = Some(());
+                            }
+                            Field::Identification => {
+                                identification = Some(());
+                            }
+                            Field::Defaults => {
+                                defaults = Some(());
+                            }
+                            Field::Credit => {
+                                credit.push(());
+                            }
+                            Field::PartList => {
+                                part_list = ();
+                            }
+                            Field::Part => {
+                                part.push(());
+                            }
+                        }
+
+                        reader.read_to_end(b.name()).unwrap();
+                        dbg!(last_field);
+                    }
+                    MyEvent::End(b) if b.name().as_ref() == b"score-partwise" => break,
+                    MyEvent::End(b) => {
+                        todo!("Unexpected end")
+                    }
+                    MyEvent::Text(b) => todo!("Text"),
+                    MyEvent::Eof => todo!("Eof"),
+                }
+            }
+
+            // let mut util = ReadUtils {
+            //     reader,
+            //     start: &mut start,
+            // };
+            //
+            // util.expect_tag(b"score-partwise");
+
+            // util.optional_ignore_children(b"work", |_| {
+            //     work = Some(());
+            // });
+            //
+            // util.optional_ignore_children(b"movement-number", |_| {
+            //     movement_number = Some(());
+            // });
+            //
+            // util.optional_ignore_children(b"movement-title", |_| {
+            //     movement_title = Some(());
+            // });
+            //
+            // util.optional_ignore_children(b"identification", |_| {
+            //     identification = Some(());
+            // });
+            //
+            // util.optional_ignore_children(b"defaults", |_| {
+            //     defaults = Some(());
+            // });
+            //
+            // util.zero_or_more(b"credit", |r| {
+            //     credit.push(());
+            //     r.ignore_children();
+            // });
+            //
+            // util.required(b"part-list", |r| {
+            //     part_list = ();
+            //     r.ignore_children();
+            // });
+            //
+            // assert_eq!(util.start.name().as_ref(), b"part", "TODO");
+            //
+            // util.one_or_more(b"part", |r| {
+            //     part.push(());
+            //     r.ignore_children();
+            // });
+
+            // while start.name().as_ref() == b"part" {
+            //     part.push(());
+            //     reader.read_to_end(start.to_end().name()).expect("TODO");
+            //     if let Some(next) = reader.read_start_maybe() {
+            //         start = next;
+            //     } else {
+            //         break;
+            //     }
+            // }
+
+            Self {
+                work,
+                movement_number,
+                movement_title,
+                identification,
+                defaults,
+                credit,
+                part_list,
+                part,
+            }
+        }
+    }
+
     #[test]
     fn grace_cue() {
         let src = xml!(
         <score-partwise>
+          <work>
+          </work>
+          <credit/>
+          <part-list>
+          </part-list>
+          <part id="P1">
+            <measure>
+              <note>
+                <grace slash="yes"/>
+                <cue/>
+                <pitch><step>D</step><octave>5</octave></pitch>
+              </note>
+            </measure>
+          </part>
           <part id="P1">
             <measure>
               <note>
@@ -463,9 +832,42 @@ mod tests {
         </score-partwise>
         );
 
-        let v: musicxml::ScorePartwise = quick_xml::de::from_str(src).unwrap();
+        {
+            let mut reader = Reader::from_str(src);
+            reader.config_mut().trim_text(true);
+            reader.config_mut().expand_empty_elements = true;
 
-        dbg!(v);
+            let score = ScorePartwise::parse(&mut reader);
+
+            dbg!(score);
+
+            // reader.read_start_named(b"score-partwise");
+            //
+            // loop {
+            //     match dbg!(reader.read_event()) {
+            //         Err(e) => panic!("Error at position {}: {:?}", reader.error_position(), e),
+            //         // exits the loop when reaching end of file
+            //         Ok(Event::Eof) => break,
+            //
+            //         Ok(Event::Start(e)) => match e.name().as_ref() {
+            //             b"tag1" => println!(
+            //                 "attributes values: {:?}",
+            //                 e.attributes().map(|a| a.unwrap().value).collect::<Vec<_>>()
+            //             ),
+            //             b"tag2" => count += 1,
+            //             _ => (),
+            //         },
+            //         Ok(Event::Text(e)) => txt.push(e.decode().unwrap().into_owned()),
+            //
+            //         // There are several other `Event`s we do not consider here
+            //         _ => (),
+            //     }
+            // }
+        }
+
+        // let v: musicxml::ScorePartwise = quick_xml::de::from_str(src).unwrap();
+        //
+        // dbg!(v);
 
         // insta::assert_debug_snapshot!(midi);
     }

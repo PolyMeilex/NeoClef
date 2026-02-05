@@ -8,10 +8,11 @@ members = ["./serde-value"]
 
 [dependencies]
 midly = "0.5.3"
-quick-xml = { version = "0.37.5", features = ["serialize", "serde-types", "overlapped-lists"] }
+quick-xml = { version = "0.39.0", features = ["serialize", "serde-types", "overlapped-lists"] }
 serde = { version = "1.0.219", features = ["derive"] }
 serde-value = { path = "./serde-value" }
 indexmap = "2.13.0"
+thiserror = "2.0.18"
 
 [dev-dependencies]
 insta = "1.43.1"
