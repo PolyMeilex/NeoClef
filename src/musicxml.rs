@@ -1,4 +1,5 @@
 use std::fmt;
+use std::str::FromStr;
 
 use indexmap::IndexMap;
 use log::error;
@@ -388,20 +389,20 @@ impl Time {
 /// https://w3c.github.io/musicxml/musicxml-reference/elements/clef/
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Clef {
-    pub sign: String,
-    pub line: Option<String>,
+    pub sign: ClefSign,
+    pub line: Option<StaffLinePosition>,
 }
 
 impl Clef {
     pub fn parse(reader: &mut Reader, start: &BytesStart) -> Self {
-        let mut sign: String = String::new();
-        let mut line: Option<String> = None;
+        let mut sign: Option<ClefSign> = None;
+        let mut line: Option<StaffLinePosition> = None;
 
         loop {
             match reader.read_event().unwrap() {
                 Event::Start(b) => match b.name().as_ref() {
                     b"sign" => {
-                        sign = reader.read_text_and_parse(b.name()).unwrap_or_default();
+                        sign = reader.read_text_and_parse(b.name());
                     }
                     b"line" => {
                         line = reader.read_text_and_parse(b.name());
@@ -419,7 +420,40 @@ impl Clef {
             }
         }
 
+        let sign = sign.unwrap();
+
         Self { sign, line }
+    }
+}
+
+/// https://w3c.github.io/musicxml/musicxml-reference/data-types/clef-sign/
+#[derive(Debug, Clone, Copy, Eq, PartialEq, Serialize, Deserialize)]
+pub enum ClefSign {
+    G,
+    F,
+    C,
+    Percussion,
+    Tab,
+    Jianpu,
+    None,
+}
+
+impl FromStr for ClefSign {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let v = match s {
+            "G" => ClefSign::G,
+            "F" => ClefSign::F,
+            "C" => ClefSign::C,
+            "percussion" => ClefSign::Percussion,
+            "TAB" => ClefSign::Tab,
+            "jianpu" => ClefSign::Jianpu,
+            "none" => ClefSign::None,
+            other => return Err(format!("unknown clef sign: {}", other)),
+        };
+
+        Ok(v)
     }
 }
 
@@ -760,6 +794,9 @@ mod primitive {
     ///
     /// Spec: https://www.w3.org/2021/06/musicxml40/musicxml-reference/data-types/octave/
     pub type Octave = u8;
+
+    /// https://w3c.github.io/musicxml/musicxml-reference/data-types/staff-line-position/
+    pub type StaffLinePosition = u8;
 
     /// The step type represents a step of the diatonic scale, represented using the English letters A through G.
     ///
