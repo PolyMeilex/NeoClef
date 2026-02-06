@@ -1,12 +1,12 @@
+#![allow(dead_code)]
+
 use std::str::FromStr;
 
 use log::error;
 use quick_xml::events::{BytesStart, Event};
-use serde::{Deserialize, Serialize};
 
 /// https://w3c.github.io/musicxml/musicxml-reference/elements/score-partwise/
-#[derive(Debug, Serialize, Deserialize)]
-#[serde(rename_all = "kebab-case")]
+#[derive(Debug)]
 pub struct ScorePartwise {
     pub part: Vec<Part>,
 }
@@ -39,7 +39,7 @@ impl ScorePartwise {
 }
 
 /// https://w3c.github.io/musicxml/musicxml-reference/elements/part-partwise/
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug)]
 pub struct Part {
     pub measure: Vec<Measure>,
 }
@@ -69,9 +69,8 @@ impl Part {
 }
 
 /// https://w3c.github.io/musicxml/musicxml-reference/elements/measure-partwise/
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug)]
 pub struct Measure {
-    #[serde(rename = "$value")]
     pub content: Vec<MeasureItem>,
 }
 
@@ -116,8 +115,7 @@ impl Measure {
     }
 }
 
-#[derive(Debug, Serialize, Deserialize)]
-#[serde(rename_all = "kebab-case")]
+#[derive(Debug)]
 #[allow(clippy::large_enum_variant)]
 pub enum MeasureItem {
     Print(Print),
@@ -128,8 +126,7 @@ pub enum MeasureItem {
     Direction(Direction),
 }
 
-#[derive(Debug, Serialize, Deserialize)]
-#[serde(rename_all = "kebab-case")]
+#[derive(Debug)]
 pub struct Print {}
 
 impl Print {
@@ -140,14 +137,11 @@ impl Print {
 }
 
 /// https://w3c.github.io/musicxml/musicxml-reference/elements/attributes/
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug)]
 pub struct Attributes {
     pub divisions: Option<PositiveDivisions>,
-    #[serde(default)]
     pub key: Vec<Key>,
-    #[serde(default)]
     pub time: Vec<Time>,
-    #[serde(default)]
     pub clef: Vec<Clef>,
 }
 
@@ -188,8 +182,7 @@ impl Attributes {
 }
 
 /// https://w3c.github.io/musicxml/musicxml-reference/elements/barline/
-#[derive(Debug, Serialize, Deserialize)]
-#[serde(rename_all = "kebab-case")]
+#[derive(Debug)]
 pub struct Barline {}
 
 impl Barline {
@@ -200,8 +193,7 @@ impl Barline {
 }
 
 /// https://w3c.github.io/musicxml/musicxml-reference/elements/backup/
-#[derive(Debug, Serialize, Deserialize)]
-#[serde(rename_all = "kebab-case")]
+#[derive(Debug)]
 pub struct Backup {
     pub duration: PositiveDivisions,
 }
@@ -236,8 +228,7 @@ impl Backup {
 }
 
 /// https://www.w3.org/2021/06/musicxml40/musicxml-reference/elements/direction/
-#[derive(Debug, Serialize, Deserialize)]
-#[serde(rename_all = "kebab-case")]
+#[derive(Debug)]
 pub struct Direction {
     pub sound: Option<Sound>,
 }
@@ -268,10 +259,8 @@ impl Direction {
 }
 
 /// https://w3c.github.io/musicxml/musicxml-reference/elements/sound/
-#[derive(Debug, Serialize, Deserialize)]
-#[serde(rename_all = "kebab-case")]
+#[derive(Debug)]
 pub struct Sound {
-    #[serde(rename = "@tempo")]
     pub tempo: Option<NonNegativeDecimal>,
 }
 
@@ -293,7 +282,7 @@ impl Sound {
 }
 
 /// https://w3c.github.io/musicxml/musicxml-reference/elements/key/
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug)]
 pub struct Key {
     pub fifths: String,
 }
@@ -326,8 +315,7 @@ impl Key {
 }
 
 /// https://w3c.github.io/musicxml/musicxml-reference/elements/time/
-#[derive(Debug, Serialize, Deserialize, PartialEq)]
-#[serde(rename_all = "kebab-case")]
+#[derive(Debug, PartialEq)]
 pub struct Time {
     pub beats: String,
     pub beat_type: String,
@@ -364,7 +352,7 @@ impl Time {
 }
 
 /// https://w3c.github.io/musicxml/musicxml-reference/elements/clef/
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug)]
 pub struct Clef {
     pub sign: ClefSign,
     pub line: Option<StaffLinePosition>,
@@ -400,14 +388,12 @@ impl Clef {
 }
 
 /// https://w3c.github.io/musicxml/musicxml-reference/elements/note/
-#[derive(Default, Debug, Serialize, Deserialize)]
-#[serde(rename_all = "kebab-case")]
+#[derive(Default, Debug)]
 pub struct Note {
     pub pitch: Option<Pitch>,
     pub chord: Option<Chord>,
     pub duration: PositiveDivisions,
     pub voice: Option<String>,
-    #[serde(rename = "type")]
     pub kind: Option<String>,
     pub stem: Option<String>,
     pub rest: Option<Rest>,
@@ -467,11 +453,9 @@ impl Note {
 }
 
 /// https://w3c.github.io/musicxml/musicxml-reference/elements/tie/
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug)]
 pub struct Tie {
-    #[serde(rename = "@type")]
     pub kind: StartStop,
-    #[serde(rename = "@time-only")]
     pub time_only: Option<String>,
 }
 
@@ -498,8 +482,7 @@ impl Tie {
 }
 
 /// https://w3c.github.io/musicxml/musicxml-reference/data-types/start-stop/
-#[derive(Debug, Serialize, Deserialize, Clone, Copy, PartialEq, Eq, Hash)]
-#[serde(rename_all = "kebab-case")]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum StartStop {
     Start,
     Stop,
@@ -521,7 +504,7 @@ impl StartStop {
 }
 
 /// https://w3c.github.io/musicxml/musicxml-reference/elements/pitch/
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug)]
 pub struct Pitch {
     pub step: Step,
     pub alter: Option<Semitones>,
@@ -564,7 +547,7 @@ impl Pitch {
     }
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug)]
 pub struct Chord {}
 
 impl Chord {
@@ -574,9 +557,8 @@ impl Chord {
     }
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug)]
 pub struct Rest {
-    #[serde(default, rename = "@measure")]
     pub measure: bool,
 }
 
@@ -737,7 +719,7 @@ mod primitive {
     /// The step type represents a step of the diatonic scale, represented using the English letters A through G.
     ///
     /// Spec: https://www.w3.org/2021/06/musicxml40/musicxml-reference/data-types/step/
-    #[derive(Debug, Clone, Copy, Eq, Ord, Hash, PartialEq, PartialOrd, Deserialize, Serialize)]
+    #[derive(Debug, Clone, Copy, Eq, Ord, Hash, PartialEq, PartialOrd)]
     pub enum Step {
         A,
         B,
@@ -771,7 +753,7 @@ mod primitive {
     }
 
     /// https://w3c.github.io/musicxml/musicxml-reference/data-types/clef-sign/
-    #[derive(Debug, Clone, Copy, Eq, PartialEq, Serialize, Deserialize)]
+    #[derive(Debug, Clone, Copy, Eq, PartialEq)]
     pub enum ClefSign {
         G,
         F,
