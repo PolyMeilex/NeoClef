@@ -1,13 +1,8 @@
-use std::fmt;
 use std::str::FromStr;
 
-use indexmap::IndexMap;
 use log::error;
-use quick_xml::{
-    events::{BytesStart, Event},
-    name::QName,
-};
-use serde::{Deserialize, Deserializer, Serialize, de};
+use quick_xml::events::{BytesStart, Event};
+use serde::{Deserialize, Serialize};
 
 /// https://w3c.github.io/musicxml/musicxml-reference/elements/score-partwise/
 #[derive(Debug, Serialize, Deserialize)]
@@ -22,9 +17,7 @@ impl ScorePartwise {
         loop {
             match reader.read_event().unwrap() {
                 Event::Start(b) => match b.name().as_ref() {
-                    b"part" => {
-                        part.push(Part::parse(reader, &b));
-                    }
+                    b"part" => part.push(Part::parse(reader, &b)),
                     _ => {
                         reader.read_to_end(b.name()).unwrap();
                     }
@@ -57,9 +50,7 @@ impl Part {
         loop {
             match reader.read_event().unwrap() {
                 Event::Start(b) => match b.name().as_ref() {
-                    b"measure" => {
-                        measure.push(Measure::parse(reader, &b));
-                    }
+                    b"measure" => measure.push(Measure::parse(reader, &b)),
                     _ => {
                         reader.read_to_end(b.name()).unwrap();
                     }
@@ -170,18 +161,10 @@ impl Attributes {
         loop {
             match reader.read_event().unwrap() {
                 Event::Start(b) => match b.name().as_ref() {
-                    b"divisions" => {
-                        divisions = reader.read_text_and_parse(b.name());
-                    }
-                    b"key" => {
-                        key.push(Key::parse(reader, &b));
-                    }
-                    b"time" => {
-                        time.push(Time::parse(reader, &b));
-                    }
-                    b"clef" => {
-                        clef.push(Clef::parse(reader, &b));
-                    }
+                    b"divisions" => divisions = reader.read_text_as(b.name()),
+                    b"key" => key.push(Key::parse(reader, &b)),
+                    b"time" => time.push(Time::parse(reader, &b)),
+                    b"clef" => clef.push(Clef::parse(reader, &b)),
                     _ => {
                         reader.read_to_end(b.name()).unwrap();
                     }
@@ -230,9 +213,7 @@ impl Backup {
         loop {
             match reader.read_event().unwrap() {
                 Event::Start(b) => match b.name().as_ref() {
-                    b"duration" => {
-                        duration = reader.read_text_and_parse(b.name());
-                    }
+                    b"duration" => duration = reader.read_text_as(b.name()),
                     _ => {
                         reader.read_to_end(b.name()).unwrap();
                     }
@@ -268,9 +249,7 @@ impl Direction {
         loop {
             match reader.read_event().unwrap() {
                 Event::Start(b) => match b.name().as_ref() {
-                    b"sound" => {
-                        sound = Some(Sound::parse(reader, &b));
-                    }
+                    b"sound" => sound = Some(Sound::parse(reader, &b)),
                     _ => {
                         reader.read_to_end(b.name()).unwrap();
                     }
@@ -298,17 +277,14 @@ pub struct Sound {
 
 impl Sound {
     pub fn parse(reader: &mut Reader, start: &BytesStart) -> Self {
-        // TODO: Shity code
-        let tempo: Option<NonNegativeDecimal> = start
-            .attributes()
-            .filter_map(|res| res.ok())
-            .find(|attr| attr.key.into_inner() == b"tempo")
-            .and_then(|attr| {
-                let attr = std::str::from_utf8(&attr.value)
-                    .inspect_err(|err| error!("{err}"))
-                    .ok()?;
-                attr.parse().inspect_err(|err| error!("{err}")).ok()
-            });
+        let mut tempo: Option<NonNegativeDecimal> = None;
+
+        for attr in start.attributes().filter_map(|r| r.ok()) {
+            match attr.key.as_ref() {
+                b"tempo" => tempo = parse_str_as(&attr.value),
+                _ => {}
+            }
+        }
 
         reader.read_to_end(start.name()).unwrap();
 
@@ -316,6 +292,7 @@ impl Sound {
     }
 }
 
+/// https://w3c.github.io/musicxml/musicxml-reference/elements/key/
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Key {
     pub fifths: String,
@@ -323,14 +300,12 @@ pub struct Key {
 
 impl Key {
     pub fn parse(reader: &mut Reader, start: &BytesStart) -> Self {
-        let mut fifths: String = String::new();
+        let mut fifths: Option<String> = None;
 
         loop {
             match reader.read_event().unwrap() {
                 Event::Start(b) => match b.name().as_ref() {
-                    b"fifths" => {
-                        fifths = reader.read_text_and_parse(b.name()).unwrap_or_default();
-                    }
+                    b"fifths" => fifths = reader.read_text_as(b.name()),
                     _ => {
                         reader.read_to_end(b.name()).unwrap();
                     }
@@ -344,10 +319,13 @@ impl Key {
             }
         }
 
+        let fifths = fifths.unwrap();
+
         Self { fifths }
     }
 }
 
+/// https://w3c.github.io/musicxml/musicxml-reference/elements/time/
 #[derive(Debug, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "kebab-case")]
 pub struct Time {
@@ -357,18 +335,14 @@ pub struct Time {
 
 impl Time {
     pub fn parse(reader: &mut Reader, start: &BytesStart) -> Self {
-        let mut beats: String = String::new();
-        let mut beat_type: String = String::new();
+        let mut beats = None;
+        let mut beat_type = None;
 
         loop {
             match reader.read_event().unwrap() {
                 Event::Start(b) => match b.name().as_ref() {
-                    b"beats" => {
-                        beats = reader.read_text_and_parse(b.name()).unwrap_or_default();
-                    }
-                    b"beat-type" => {
-                        beat_type = reader.read_text_and_parse(b.name()).unwrap_or_default();
-                    }
+                    b"beats" => beats = reader.read_text(b.name()).ok(),
+                    b"beat-type" => beat_type = reader.read_text(b.name()).ok(),
                     _ => {
                         reader.read_to_end(b.name()).unwrap();
                     }
@@ -381,6 +355,9 @@ impl Time {
                 _ => {}
             }
         }
+
+        let beats = beats.unwrap().to_string();
+        let beat_type = beat_type.unwrap().to_string();
 
         Self { beats, beat_type }
     }
@@ -401,12 +378,8 @@ impl Clef {
         loop {
             match reader.read_event().unwrap() {
                 Event::Start(b) => match b.name().as_ref() {
-                    b"sign" => {
-                        sign = reader.read_text_and_parse(b.name());
-                    }
-                    b"line" => {
-                        line = reader.read_text_and_parse(b.name());
-                    }
+                    b"sign" => sign = reader.read_text_as(b.name()),
+                    b"line" => line = reader.read_text_as(b.name()),
                     _ => {
                         reader.read_to_end(b.name()).unwrap();
                     }
@@ -455,30 +428,14 @@ impl Note {
         loop {
             match reader.read_event().unwrap() {
                 Event::Start(b) => match b.name().as_ref() {
-                    b"pitch" => {
-                        pitch = Some(Pitch::parse(reader, &b));
-                    }
-                    b"chord" => {
-                        chord = Some(Chord::parse(reader, &b));
-                    }
-                    b"duration" => {
-                        duration = reader.read_text_and_parse(b.name());
-                    }
-                    b"voice" => {
-                        voice = reader.read_text_and_parse(b.name());
-                    }
-                    b"type" => {
-                        kind = reader.read_text_and_parse(b.name());
-                    }
-                    b"stem" => {
-                        stem = reader.read_text_and_parse(b.name());
-                    }
-                    b"rest" => {
-                        rest = Some(Rest::parse(reader, &b));
-                    }
-                    b"tie" => {
-                        tie = Some(Tie::parse(reader, &b));
-                    }
+                    b"pitch" => pitch = Some(Pitch::parse(reader, &b)),
+                    b"chord" => chord = Some(Chord::parse(reader, &b)),
+                    b"duration" => duration = reader.read_text_as(b.name()),
+                    b"voice" => voice = reader.read_text_as(b.name()),
+                    b"type" => kind = reader.read_text_as(b.name()),
+                    b"stem" => stem = reader.read_text_as(b.name()),
+                    b"rest" => rest = Some(Rest::parse(reader, &b)),
+                    b"tie" => tie = Some(Tie::parse(reader, &b)),
                     _ => {
                         reader.read_to_end(b.name()).unwrap();
                     }
@@ -525,23 +482,8 @@ impl Tie {
 
         for attr in start.attributes().filter_map(|r| r.ok()) {
             match attr.key.as_ref() {
-                b"type" => {
-                    kind = match attr.value.as_ref() {
-                        b"start" => Some(StartStop::Start),
-                        b"stop" => Some(StartStop::Stop),
-                        other => {
-                            error!("Unexpected tie type: {other:?}");
-                            None
-                        }
-                    };
-                }
-                b"time-only" => {
-                    if let Ok(s) =
-                        std::str::from_utf8(&attr.value).inspect_err(|e| error!("time-only: {e}"))
-                    {
-                        time_only = Some(s.to_string());
-                    }
-                }
+                b"type" => kind = StartStop::parse(attr.value.as_ref()),
+                b"time-only" => time_only = parse_str_as(&attr.value),
                 _ => {}
             }
         }
@@ -563,6 +505,21 @@ pub enum StartStop {
     Stop,
 }
 
+impl StartStop {
+    fn parse(bytes: &[u8]) -> Option<Self> {
+        let v = match bytes {
+            b"start" => StartStop::Start,
+            b"stop" => StartStop::Stop,
+            other => {
+                error!("Unexpected tie type: {other:?}");
+                return None;
+            }
+        };
+
+        Some(v)
+    }
+}
+
 /// https://w3c.github.io/musicxml/musicxml-reference/elements/pitch/
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Pitch {
@@ -580,15 +537,9 @@ impl Pitch {
         loop {
             match reader.read_event().unwrap() {
                 Event::Start(b) => match b.name().as_ref() {
-                    b"step" => {
-                        step = Step::parse(reader, &b);
-                    }
-                    b"alter" => {
-                        alter = reader.read_text_and_parse(b.name());
-                    }
-                    b"octave" => {
-                        octave = reader.read_text_and_parse(b.name());
-                    }
+                    b"step" => step = Step::parse(reader, &b),
+                    b"alter" => alter = reader.read_text_as(b.name()),
+                    b"octave" => octave = reader.read_text_as(b.name()),
                     _ => {
                         reader.read_to_end(b.name()).unwrap();
                     }
@@ -625,33 +576,24 @@ impl Chord {
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Rest {
-    // TODO: not optional
-    #[serde(rename = "@measure")]
-    pub measure: Option<bool>,
+    #[serde(default, rename = "@measure")]
+    pub measure: bool,
 }
 
 impl Rest {
     pub fn parse(reader: &mut Reader, start: &BytesStart) -> Self {
-        // TODO: Shity code
-        let measure: bool = start
-            .attributes()
-            .filter_map(|res| res.ok())
-            .find(|attr| attr.key.into_inner() == b"measure")
-            .map(|attr| match attr.value.as_ref() {
-                b"yes" => true,
-                b"no" => false,
-                value => {
-                    error!("Unexpected bool value: {value:?}");
-                    false
-                }
-            })
-            .unwrap_or(false);
+        let mut measure = false;
+
+        for attr in start.attributes().filter_map(|r| r.ok()) {
+            match attr.key.as_ref() {
+                b"measure" => measure = parse_yes_no(attr.value.as_ref()),
+                _ => {}
+            }
+        }
 
         reader.read_to_end(start.name()).unwrap();
 
-        Self {
-            measure: Some(measure),
-        }
+        Self { measure }
     }
 }
 
@@ -766,6 +708,31 @@ mod primitive {
 
     /// https://w3c.github.io/musicxml/musicxml-reference/data-types/staff-line-position/
     pub type StaffLinePosition = u8;
+
+    pub fn parse_yes_no(s: &[u8]) -> bool {
+        match s {
+            b"yes" => true,
+            b"no" => false,
+            value => {
+                error!("Unexpected bool value: {value:?}");
+                false
+            }
+        }
+    }
+
+    pub fn parse_str(s: &[u8]) -> &str {
+        std::str::from_utf8(s).unwrap()
+    }
+
+    pub fn parse_str_as<T: FromStr>(v: &[u8]) -> Option<T>
+    where
+        T::Err: std::fmt::Display,
+    {
+        let v = std::str::from_utf8(v)
+            .inspect_err(|err| error!("{err}"))
+            .ok()?;
+        v.parse().inspect_err(|err| error!("{err}")).ok()
+    }
 
     /// The step type represents a step of the diatonic scale, represented using the English letters A through G.
     ///

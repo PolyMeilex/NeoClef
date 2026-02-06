@@ -274,13 +274,13 @@ fn midi_note_number(step: musicxml::Step, octave: u8, alter: f64) -> u8 {
 type Reader<'a> = quick_xml::reader::Reader<&'a [u8]>;
 
 trait ReaderExt<'b> {
-    fn read_text_and_parse<T: FromStr>(&mut self, end: QName) -> Option<T>
+    fn read_text_as<T: FromStr>(&mut self, end: QName) -> Option<T>
     where
         T::Err: std::fmt::Display;
 }
 
 impl<'b> ReaderExt<'b> for quick_xml::reader::Reader<&'b [u8]> {
-    fn read_text_and_parse<T: FromStr>(&mut self, end: QName) -> Option<T>
+    fn read_text_as<T: FromStr>(&mut self, end: QName) -> Option<T>
     where
         T::Err: std::fmt::Display,
     {
@@ -297,8 +297,6 @@ impl<'b> ReaderExt<'b> for quick_xml::reader::Reader<&'b [u8]> {
 
 #[cfg(test)]
 mod tests {
-    use std::str::FromStr;
-
     use super::*;
 
     macro_rules! xml {
