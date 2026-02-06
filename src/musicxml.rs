@@ -426,37 +426,6 @@ impl Clef {
     }
 }
 
-/// https://w3c.github.io/musicxml/musicxml-reference/data-types/clef-sign/
-#[derive(Debug, Clone, Copy, Eq, PartialEq, Serialize, Deserialize)]
-pub enum ClefSign {
-    G,
-    F,
-    C,
-    Percussion,
-    Tab,
-    Jianpu,
-    None,
-}
-
-impl FromStr for ClefSign {
-    type Err = String;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let v = match s {
-            "G" => ClefSign::G,
-            "F" => ClefSign::F,
-            "C" => ClefSign::C,
-            "percussion" => ClefSign::Percussion,
-            "TAB" => ClefSign::Tab,
-            "jianpu" => ClefSign::Jianpu,
-            "none" => ClefSign::None,
-            other => return Err(format!("unknown clef sign: {}", other)),
-        };
-
-        Ok(v)
-    }
-}
-
 /// https://w3c.github.io/musicxml/musicxml-reference/elements/note/
 #[derive(Default, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
@@ -831,6 +800,37 @@ mod primitive {
             };
 
             Some(step)
+        }
+    }
+
+    /// https://w3c.github.io/musicxml/musicxml-reference/data-types/clef-sign/
+    #[derive(Debug, Clone, Copy, Eq, PartialEq, Serialize, Deserialize)]
+    pub enum ClefSign {
+        G,
+        F,
+        C,
+        Percussion,
+        Tab,
+        Jianpu,
+        None,
+    }
+
+    impl FromStr for ClefSign {
+        type Err = String;
+
+        fn from_str(s: &str) -> Result<Self, Self::Err> {
+            let v = match s {
+                "G" => ClefSign::G,
+                "F" => ClefSign::F,
+                "C" => ClefSign::C,
+                "percussion" => ClefSign::Percussion,
+                "TAB" => ClefSign::Tab,
+                "jianpu" => ClefSign::Jianpu,
+                "none" => ClefSign::None,
+                other => return Err(format!("unknown clef sign: {}", other)),
+            };
+
+            Ok(v)
         }
     }
 }
