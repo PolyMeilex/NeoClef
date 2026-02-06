@@ -4,7 +4,6 @@ mod musicxml;
 
 use std::{collections::BTreeMap, str::FromStr, time::Duration};
 
-use log::error;
 use musicxml::MeasureItem;
 use quick_xml::{events::Event, name::QName};
 
@@ -35,7 +34,7 @@ fn main() {
     smf.save("out.mid").unwrap();
 }
 
-fn parse(src: &str) -> midly::Smf {
+fn parse(src: &str) -> midly::Smf<'static> {
     let v = {
         let mut reader = quick_xml::Reader::from_str(src);
         reader.config_mut().trim_text(true);
@@ -49,8 +48,8 @@ fn parse(src: &str) -> midly::Smf {
                         break score;
                     }
                     _ => {
-                        todo!();
                         reader.read_to_end(b.name()).unwrap();
+                        todo!();
                     }
                 },
                 Event::End(b) => {
@@ -66,10 +65,6 @@ fn parse(src: &str) -> midly::Smf {
             }
         }
     };
-
-    // dbg!(&v);
-
-    // let v: musicxml::ScorePartwise = quick_xml::de::from_str(src).unwrap();
 
     // dbg!(&v);
 
@@ -211,20 +206,20 @@ fn parse(src: &str) -> midly::Smf {
             MeasureItem::Print(_) => {}
             MeasureItem::Barline(_) => {}
             MeasureItem::Direction(direction) => {
-                if let Some(sound) = direction.sound.as_ref() {
-                    if let Some(tempo) = sound.tempo.as_ref() {
-                        let tempo = tempo.round() as u64;
+                if let Some(sound) = direction.sound.as_ref()
+                    && let Some(tempo) = sound.tempo.as_ref()
+                {
+                    let tempo = tempo.round() as u64;
 
-                        let microseconds_per_quarter_note = MINUTE.as_micros() as u64 / tempo;
-                        let microseconds_per_quarter_note = microseconds_per_quarter_note as u32;
+                    let microseconds_per_quarter_note = MINUTE.as_micros() as u64 / tempo;
+                    let microseconds_per_quarter_note = microseconds_per_quarter_note as u32;
 
-                        events.entry(position).or_default().push(midly::TrackEvent {
-                            delta: 0.into(),
-                            kind: midly::TrackEventKind::Meta(midly::MetaMessage::Tempo(
-                                microseconds_per_quarter_note.into(),
-                            )),
-                        });
-                    }
+                    events.entry(position).or_default().push(midly::TrackEvent {
+                        delta: 0.into(),
+                        kind: midly::TrackEventKind::Meta(midly::MetaMessage::Tempo(
+                            microseconds_per_quarter_note.into(),
+                        )),
+                    });
                 }
             }
         }
