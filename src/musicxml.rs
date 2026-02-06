@@ -547,6 +547,7 @@ impl Pitch {
     }
 }
 
+/// https://w3c.github.io/musicxml/musicxml-reference/elements/chord/
 #[derive(Debug)]
 pub struct Chord {}
 
@@ -557,6 +558,7 @@ impl Chord {
     }
 }
 
+/// https://w3c.github.io/musicxml/musicxml-reference/elements/rest/
 #[derive(Debug)]
 pub struct Rest {
     pub measure: bool,
