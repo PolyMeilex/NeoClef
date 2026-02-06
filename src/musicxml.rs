@@ -3,7 +3,22 @@
 use std::str::FromStr;
 
 use log::error;
-use quick_xml::events::{BytesStart, Event};
+use quick_xml::{
+    events::{BytesStart, Event},
+    reader::Span,
+};
+
+#[derive(thiserror::Error, Debug)]
+pub enum MusicXmlParseError {
+    #[error("Missing tag {0:?} at {1:?}")]
+    MissingTag(&'static str, Span),
+    #[error("Unexpected end of file")]
+    UnexpectedEof,
+    #[error(transparent)]
+    Xml(#[from] quick_xml::errors::Error),
+}
+
+pub type Result<T, E = MusicXmlParseError> = std::result::Result<T, E>;
 
 /// https://w3c.github.io/musicxml/musicxml-reference/elements/score-partwise/
 #[derive(Debug)]
@@ -12,12 +27,12 @@ pub struct ScorePartwise {
 }
 
 impl ScorePartwise {
-    pub fn parse(reader: &mut Reader, start: &BytesStart) -> Self {
+    pub fn parse(reader: &mut Reader, start: &BytesStart) -> Result<Self> {
         let mut part = Vec::new();
         loop {
-            match reader.read_event().unwrap() {
+            match reader.read_event()? {
                 Event::Start(b) => match b.name().as_ref() {
-                    b"part" => part.push(Part::parse(reader, &b)),
+                    b"part" => part.push(Part::parse(reader, &b)?),
                     _ => {
                         reader.read_to_end(b.name()).unwrap();
                     }
@@ -27,14 +42,13 @@ impl ScorePartwise {
                     break;
                 }
                 Event::Eof => {
-                    error!("Unexpected Eof");
-                    break;
+                    return Err(MusicXmlParseError::UnexpectedEof);
                 }
                 _ => {}
             }
         }
 
-        Self { part }
+        Ok(Self { part })
     }
 }
 
@@ -45,12 +59,12 @@ pub struct Part {
 }
 
 impl Part {
-    pub fn parse(reader: &mut Reader, start: &BytesStart) -> Self {
+    pub fn parse(reader: &mut Reader, start: &BytesStart) -> Result<Self> {
         let mut measure = Vec::new();
         loop {
-            match reader.read_event().unwrap() {
+            match reader.read_event()? {
                 Event::Start(b) => match b.name().as_ref() {
-                    b"measure" => measure.push(Measure::parse(reader, &b)),
+                    b"measure" => measure.push(Measure::parse(reader, &b)?),
                     _ => {
                         reader.read_to_end(b.name()).unwrap();
                     }
@@ -59,12 +73,12 @@ impl Part {
                     assert_eq!(b.name(), start.name());
                     break;
                 }
-                Event::Eof => todo!(),
+                Event::Eof => return Err(MusicXmlParseError::UnexpectedEof),
                 _ => {}
             }
         }
 
-        Self { measure }
+        Ok(Self { measure })
     }
 }
 
@@ -75,28 +89,28 @@ pub struct Measure {
 }
 
 impl Measure {
-    pub fn parse(reader: &mut Reader, start: &BytesStart) -> Self {
+    pub fn parse(reader: &mut Reader, start: &BytesStart) -> Result<Self> {
         let mut content = Vec::new();
         loop {
-            match reader.read_event().unwrap() {
+            match reader.read_event()? {
                 Event::Start(b) => match b.name().as_ref() {
                     b"print" => {
                         content.push(MeasureItem::Print(Print::parse(reader, &b)));
                     }
                     b"attributes" => {
-                        content.push(MeasureItem::Attributes(Attributes::parse(reader, &b)));
+                        content.push(MeasureItem::Attributes(Attributes::parse(reader, &b)?));
                     }
                     b"note" => {
-                        content.push(MeasureItem::Note(Note::parse(reader, &b)));
+                        content.push(MeasureItem::Note(Note::parse(reader, &b)?));
                     }
                     b"barline" => {
                         content.push(MeasureItem::Barline(Barline::parse(reader, &b)));
                     }
                     b"backup" => {
-                        content.push(MeasureItem::Backup(Backup::parse(reader, &b)));
+                        content.push(MeasureItem::Backup(Backup::parse(reader, &b)?));
                     }
                     b"direction" => {
-                        content.push(MeasureItem::Direction(Direction::parse(reader, &b)));
+                        content.push(MeasureItem::Direction(Direction::parse(reader, &b)?));
                     }
                     _ => {
                         reader.read_to_end(b.name()).unwrap();
@@ -106,12 +120,12 @@ impl Measure {
                     assert_eq!(b.name(), start.name());
                     break;
                 }
-                Event::Eof => todo!(),
+                Event::Eof => return Err(MusicXmlParseError::UnexpectedEof),
                 _ => {}
             }
         }
 
-        Self { content }
+        Ok(Self { content })
     }
 }
 
@@ -146,19 +160,19 @@ pub struct Attributes {
 }
 
 impl Attributes {
-    pub fn parse(reader: &mut Reader, start: &BytesStart) -> Self {
+    pub fn parse(reader: &mut Reader, start: &BytesStart) -> Result<Self> {
         let mut divisions: Option<PositiveDivisions> = None;
         let mut key: Vec<Key> = vec![];
         let mut time: Vec<Time> = vec![];
         let mut clef: Vec<Clef> = vec![];
 
         loop {
-            match reader.read_event().unwrap() {
+            match reader.read_event()? {
                 Event::Start(b) => match b.name().as_ref() {
                     b"divisions" => divisions = reader.read_text_as(b.name()),
-                    b"key" => key.push(Key::parse(reader, &b)),
-                    b"time" => time.push(Time::parse(reader, &b)),
-                    b"clef" => clef.push(Clef::parse(reader, &b)),
+                    b"key" => key.push(Key::parse(reader, &b)?),
+                    b"time" => time.push(Time::parse(reader, &b)?),
+                    b"clef" => clef.push(Clef::parse(reader, &b)?),
                     _ => {
                         reader.read_to_end(b.name()).unwrap();
                     }
@@ -167,17 +181,17 @@ impl Attributes {
                     assert_eq!(b.name(), start.name());
                     break;
                 }
-                Event::Eof => todo!(),
+                Event::Eof => return Err(MusicXmlParseError::UnexpectedEof),
                 _ => {}
             }
         }
 
-        Self {
+        Ok(Self {
             divisions,
             key,
             time,
             clef,
-        }
+        })
     }
 }
 
@@ -199,11 +213,13 @@ pub struct Backup {
 }
 
 impl Backup {
-    pub fn parse(reader: &mut Reader, start: &BytesStart) -> Self {
+    pub fn parse(reader: &mut Reader, start: &BytesStart) -> Result<Self> {
+        let span_start = reader.buffer_position();
+
         let mut duration: Option<PositiveDivisions> = None;
 
         loop {
-            match reader.read_event().unwrap() {
+            match reader.read_event()? {
                 Event::Start(b) => match b.name().as_ref() {
                     b"duration" => duration = reader.read_text_as(b.name()),
                     _ => {
@@ -214,16 +230,19 @@ impl Backup {
                     assert_eq!(b.name(), start.name());
                     break;
                 }
-                Event::Eof => todo!(),
+                Event::Eof => return Err(MusicXmlParseError::UnexpectedEof),
                 _ => {}
             }
         }
 
         let Some(duration) = duration else {
-            todo!("duration missing");
+            return Err(MusicXmlParseError::MissingTag(
+                "duration",
+                span_start..reader.buffer_position(),
+            ));
         };
 
-        Self { duration }
+        Ok(Self { duration })
     }
 }
 
@@ -234,11 +253,11 @@ pub struct Direction {
 }
 
 impl Direction {
-    pub fn parse(reader: &mut Reader, start: &BytesStart) -> Self {
+    pub fn parse(reader: &mut Reader, start: &BytesStart) -> Result<Self> {
         let mut sound: Option<Sound> = None;
 
         loop {
-            match reader.read_event().unwrap() {
+            match reader.read_event()? {
                 Event::Start(b) => match b.name().as_ref() {
                     b"sound" => sound = Some(Sound::parse(reader, &b)),
                     _ => {
@@ -249,12 +268,12 @@ impl Direction {
                     assert_eq!(b.name(), start.name());
                     break;
                 }
-                Event::Eof => todo!(),
+                Event::Eof => return Err(MusicXmlParseError::UnexpectedEof),
                 _ => {}
             }
         }
 
-        Self { sound }
+        Ok(Self { sound })
     }
 }
 
@@ -288,11 +307,13 @@ pub struct Key {
 }
 
 impl Key {
-    pub fn parse(reader: &mut Reader, start: &BytesStart) -> Self {
+    pub fn parse(reader: &mut Reader, start: &BytesStart) -> Result<Self> {
+        let start_span = reader.buffer_position();
+
         let mut fifths: Option<String> = None;
 
         loop {
-            match reader.read_event().unwrap() {
+            match reader.read_event()? {
                 Event::Start(b) => match b.name().as_ref() {
                     b"fifths" => fifths = reader.read_text_as(b.name()),
                     _ => {
@@ -303,14 +324,17 @@ impl Key {
                     assert_eq!(b.name(), start.name());
                     break;
                 }
-                Event::Eof => todo!(),
+                Event::Eof => return Err(MusicXmlParseError::UnexpectedEof),
                 _ => {}
             }
         }
 
-        let fifths = fifths.unwrap();
+        let fifths = fifths.ok_or(MusicXmlParseError::MissingTag(
+            "fifths",
+            start_span..reader.buffer_position(),
+        ))?;
 
-        Self { fifths }
+        Ok(Self { fifths })
     }
 }
 
@@ -322,12 +346,12 @@ pub struct Time {
 }
 
 impl Time {
-    pub fn parse(reader: &mut Reader, start: &BytesStart) -> Self {
+    pub fn parse(reader: &mut Reader, start: &BytesStart) -> Result<Self> {
         let mut beats = None;
         let mut beat_type = None;
 
         loop {
-            match reader.read_event().unwrap() {
+            match reader.read_event()? {
                 Event::Start(b) => match b.name().as_ref() {
                     b"beats" => beats = reader.read_text(b.name()).ok(),
                     b"beat-type" => beat_type = reader.read_text(b.name()).ok(),
@@ -339,7 +363,7 @@ impl Time {
                     assert_eq!(b.name(), start.name());
                     break;
                 }
-                Event::Eof => todo!(),
+                Event::Eof => return Err(MusicXmlParseError::UnexpectedEof),
                 _ => {}
             }
         }
@@ -347,7 +371,7 @@ impl Time {
         let beats = beats.unwrap().to_string();
         let beat_type = beat_type.unwrap().to_string();
 
-        Self { beats, beat_type }
+        Ok(Self { beats, beat_type })
     }
 }
 
@@ -359,12 +383,12 @@ pub struct Clef {
 }
 
 impl Clef {
-    pub fn parse(reader: &mut Reader, start: &BytesStart) -> Self {
+    pub fn parse(reader: &mut Reader, start: &BytesStart) -> Result<Self> {
         let mut sign: Option<ClefSign> = None;
         let mut line: Option<StaffLinePosition> = None;
 
         loop {
-            match reader.read_event().unwrap() {
+            match reader.read_event()? {
                 Event::Start(b) => match b.name().as_ref() {
                     b"sign" => sign = reader.read_text_as(b.name()),
                     b"line" => line = reader.read_text_as(b.name()),
@@ -376,14 +400,14 @@ impl Clef {
                     assert_eq!(b.name(), start.name());
                     break;
                 }
-                Event::Eof => todo!(),
+                Event::Eof => return Err(MusicXmlParseError::UnexpectedEof),
                 _ => {}
             }
         }
 
         let sign = sign.unwrap();
 
-        Self { sign, line }
+        Ok(Self { sign, line })
     }
 }
 
@@ -401,7 +425,9 @@ pub struct Note {
 }
 
 impl Note {
-    pub fn parse(reader: &mut Reader, start: &BytesStart) -> Self {
+    pub fn parse(reader: &mut Reader, start: &BytesStart) -> Result<Self> {
+        let span_start = reader.buffer_position();
+
         let mut pitch: Option<Pitch> = None;
         let mut chord: Option<Chord> = None;
         let mut duration: Option<PositiveDivisions> = None;
@@ -412,10 +438,10 @@ impl Note {
         let mut tie: Option<Tie> = None;
 
         loop {
-            match reader.read_event().unwrap() {
+            match reader.read_event()? {
                 Event::Start(b) => match b.name().as_ref() {
-                    b"pitch" => pitch = Some(Pitch::parse(reader, &b)),
-                    b"chord" => chord = Some(Chord::parse(reader, &b)),
+                    b"pitch" => pitch = Some(Pitch::parse(reader, &b)?),
+                    b"chord" => chord = Some(Chord::parse(reader, &b)?),
                     b"duration" => duration = reader.read_text_as(b.name()),
                     b"voice" => voice = reader.read_text_as(b.name()),
                     b"type" => kind = reader.read_text_as(b.name()),
@@ -436,10 +462,13 @@ impl Note {
         }
 
         let Some(duration) = duration else {
-            todo!("duration missing");
+            return Err(MusicXmlParseError::MissingTag(
+                "duration",
+                span_start..reader.buffer_position(),
+            ));
         };
 
-        Self {
+        Ok(Self {
             pitch,
             chord,
             duration,
@@ -448,7 +477,7 @@ impl Note {
             stem,
             rest,
             tie,
-        }
+        })
     }
 }
 
@@ -512,13 +541,13 @@ pub struct Pitch {
 }
 
 impl Pitch {
-    pub fn parse(reader: &mut Reader, start: &BytesStart) -> Self {
+    pub fn parse(reader: &mut Reader, start: &BytesStart) -> Result<Self> {
         let mut step: Option<Step> = None;
         let mut alter: Option<Semitones> = None;
         let mut octave: Option<Octave> = None;
 
         loop {
-            match reader.read_event().unwrap() {
+            match reader.read_event()? {
                 Event::Start(b) => match b.name().as_ref() {
                     b"step" => step = Step::parse(reader, &b),
                     b"alter" => alter = reader.read_text_as(b.name()),
@@ -539,11 +568,11 @@ impl Pitch {
         let step = step.expect("missing step in pitch");
         let octave = octave.expect("missing octave in pitch");
 
-        Self {
+        Ok(Self {
             step,
             alter,
             octave,
-        }
+        })
     }
 }
 
@@ -552,9 +581,9 @@ impl Pitch {
 pub struct Chord {}
 
 impl Chord {
-    pub fn parse(reader: &mut Reader, start: &BytesStart) -> Self {
-        reader.read_to_end(start.name()).unwrap();
-        Self {}
+    pub fn parse(reader: &mut Reader, start: &BytesStart) -> Result<Self> {
+        reader.read_to_end(start.name())?;
+        Ok(Self {})
     }
 }
 

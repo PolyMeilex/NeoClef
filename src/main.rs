@@ -44,7 +44,7 @@ fn parse(src: &str) -> midly::Smf<'static> {
             match reader.read_event().unwrap() {
                 Event::Start(b) => match b.name().as_ref() {
                     b"score-partwise" => {
-                        let score = musicxml::ScorePartwise::parse(&mut reader, &b);
+                        let score = musicxml::ScorePartwise::parse(&mut reader, &b).unwrap();
                         break score;
                     }
                     _ => {
@@ -537,6 +537,9 @@ mod tests {
           <!-- </part> -->
         </score-partwise>
         );
+
+        // let span = &src[108..224];
+        // println!("{span}");
 
         parse(src);
     }
