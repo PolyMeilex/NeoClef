@@ -41,9 +41,7 @@ impl ScorePartwise {
                     assert_eq!(b.name(), start.name());
                     break;
                 }
-                Event::Eof => {
-                    return Err(MusicXmlParseError::UnexpectedEof);
-                }
+                Event::Eof => return Err(MusicXmlParseError::UnexpectedEof),
                 _ => {}
             }
         }
@@ -411,6 +409,15 @@ impl Clef {
     }
 }
 
+// TODO: Split data in this way:
+// #[derive(Debug)]
+// pub enum NoteKind {
+//     Grace,
+//     GraceCue,
+//     Cue,
+//     Regular,
+// }
+
 /// https://w3c.github.io/musicxml/musicxml-reference/elements/note/
 #[derive(Default, Debug)]
 pub struct Note {
@@ -456,7 +463,7 @@ impl Note {
                     assert_eq!(b.name(), start.name());
                     break;
                 }
-                Event::Eof => todo!(),
+                Event::Eof => return Err(MusicXmlParseError::UnexpectedEof),
                 _ => {}
             }
         }
@@ -560,7 +567,7 @@ impl Pitch {
                     assert_eq!(b.name(), start.name());
                     break;
                 }
-                Event::Eof => todo!(),
+                Event::Eof => return Err(MusicXmlParseError::UnexpectedEof),
                 _ => {}
             }
         }
