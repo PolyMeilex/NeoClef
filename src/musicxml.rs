@@ -468,6 +468,38 @@ pub struct NoteKindStateGrace {
     pub tie: Vec<Tie>,
 }
 
+impl NoteKindStateGrace {
+    pub fn parse(reader: &mut Reader, note_start_tag: &BytesStart) -> Result<Self> {
+        let mut chord: Option<Chord> = None;
+        let mut tie: Vec<Tie> = Vec::new();
+
+        loop {
+            match reader.read_event()? {
+                Event::Start(b) => match b.name().as_ref() {
+                    b"chord" => chord = Some(Chord::parse(reader, &b)?),
+                    // b"unpitched" => unpitched = Some(reader.read_text(b.name())?.to_string()),
+                    b"tie" => tie.push(Tie::parse(reader, &b)),
+                    _ => {
+                        reader.read_to_end(b.name()).unwrap();
+                    }
+                },
+                Event::End(b) => {
+                    assert_eq!(b.name(), note_start_tag.name());
+                    break;
+                }
+                Event::Eof => return Err(MusicXmlParseError::UnexpectedEof),
+                _ => {}
+            }
+        }
+
+        Ok(Self {
+            chord,
+            kind: todo!(),
+            tie,
+        })
+    }
+}
+
 #[derive(Debug)]
 pub struct NoteKindStateGraceCue {
     pub chord: Option<Chord>,
@@ -504,6 +536,20 @@ pub enum NoteKind {
     // GraceCue,
     Cue,
     Regular,
+}
+
+impl NoteKind {
+    pub fn parse_grace(reader: &mut Reader, grace_tag: &BytesStart) -> Result<Self> {
+        todo!()
+    }
+
+    pub fn parse_cue(reader: &mut Reader, cue_tag: &BytesStart) -> Result<Self> {
+        todo!()
+    }
+
+    pub fn parse_regular(reader: &mut Reader, first_child_tag: &BytesStart) -> Result<Self> {
+        todo!()
+    }
 }
 
 /// https://w3c.github.io/musicxml/musicxml-reference/elements/note/
@@ -546,6 +592,16 @@ impl Note {
                 }
                 Event::Eof => return Err(MusicXmlParseError::UnexpectedEof),
                 _ => {}
+            }
+        };
+
+        let note_kind = match first.name().as_ref() {
+            b"grace" => {
+                NoteKind::parse_grace(reader, &first);
+            }
+            b"cue" => {}
+            _ => {
+                //
             }
         };
 
