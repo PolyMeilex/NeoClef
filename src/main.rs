@@ -34,6 +34,104 @@ fn main() {
     smf.save("out.mid").unwrap();
 }
 
+fn span_to_line_col(src: &str, span_start: u64) -> (u64, u64) {
+    let offset = span_start as usize;
+    let bytes = src.as_bytes();
+
+    let mut line = 1u64;
+    let mut line_start = 0usize;
+
+    for i in 0..offset.min(bytes.len()) {
+        if bytes[i] == b'\n' {
+            line += 1;
+            line_start = i + 1;
+        }
+    }
+
+    // Column in bytes, 1-based.
+    let col = (offset.saturating_sub(line_start) + 1) as u64;
+
+    (line, col)
+}
+
+fn simple_xml_format(src: &str) -> String {
+    let mut reader = Reader::from_str(src);
+    reader.config_mut().trim_text(true);
+
+    let mut out = String::new();
+    let mut depth = 0usize;
+
+    loop {
+        match reader.read_event() {
+            Ok(Event::Start(e)) => {
+                out.push_str(&"  ".repeat(depth));
+                out.push('<');
+                out.push_str(std::str::from_utf8(e.name().as_ref()).unwrap());
+                for attr in e.attributes().flatten() {
+                    out.push(' ');
+                    out.push_str(std::str::from_utf8(attr.key.as_ref()).unwrap());
+                    out.push_str("=\"");
+                    out.push_str(&String::from_utf8_lossy(&attr.value));
+                    out.push('"');
+                }
+                out.push_str(">\n");
+                depth += 1;
+            }
+
+            Ok(Event::End(e)) => {
+                depth -= 1;
+                out.push_str(&"  ".repeat(depth));
+                out.push_str("</");
+                out.push_str(std::str::from_utf8(e.name().as_ref()).unwrap());
+                out.push_str(">\n");
+            }
+
+            Ok(Event::Empty(e)) => {
+                out.push_str(&"  ".repeat(depth));
+                out.push('<');
+                out.push_str(std::str::from_utf8(e.name().as_ref()).unwrap());
+                for attr in e.attributes().flatten() {
+                    out.push(' ');
+                    out.push_str(std::str::from_utf8(attr.key.as_ref()).unwrap());
+                    out.push_str("=\"");
+                    out.push_str(&String::from_utf8_lossy(&attr.value));
+                    out.push('"');
+                }
+                out.push_str("/>\n");
+            }
+
+            Ok(Event::Text(e)) => {
+                let text = e.decode().unwrap();
+                if !text.trim().is_empty() {
+                    out.push_str(&"  ".repeat(depth));
+                    out.push_str(text.trim());
+                    out.push('\n');
+                }
+            }
+
+            Ok(Event::Comment(e)) => {
+                out.push_str(&"  ".repeat(depth));
+                out.push_str("<!--");
+                out.push_str(&String::from_utf8_lossy(&e));
+                out.push_str("-->\n");
+            }
+
+            Ok(Event::Decl(e)) => {
+                out.push_str(&"  ".repeat(depth));
+                out.push_str(&String::from_utf8_lossy(&e));
+                out.push('\n');
+            }
+
+            Ok(Event::Eof) => break,
+
+            Err(_) => return src.to_owned(),
+            _ => {}
+        }
+    }
+
+    out
+}
+
 fn parse(src: &str) -> midly::Smf<'static> {
     let v = {
         let mut reader = quick_xml::Reader::from_str(src);
