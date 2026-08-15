@@ -411,6 +411,93 @@ impl Clef {
     }
 }
 
+#[derive(Debug)]
+pub enum NoteKindStatePitchKind {
+    Pitch(Pitch),
+    Unpitched(String),
+    Rest(Rest),
+}
+
+impl NoteKindStatePitchKind {
+    pub fn parse(reader: &mut Reader, start: &BytesStart) -> Result<Self> {
+        let mut pitch: Option<Pitch> = None;
+        let mut unpitched: Option<String> = None;
+        let mut rest: Option<Rest> = None;
+
+        loop {
+            match reader.read_event()? {
+                Event::Start(b) => match b.name().as_ref() {
+                    b"pitch" => pitch = Some(Pitch::parse(reader, &b)?),
+                    b"unpitched" => unpitched = Some(reader.read_text(b.name())?.to_string()),
+                    b"rest" => rest = Some(Rest::parse(reader, &b)),
+                    _ => {
+                        reader.read_to_end(b.name()).unwrap();
+                    }
+                },
+                Event::End(b) => {
+                    assert_eq!(b.name(), start.name());
+                    break;
+                }
+                Event::Eof => return Err(MusicXmlParseError::UnexpectedEof),
+                _ => {}
+            }
+        }
+
+        let count: u64 = [pitch.is_some(), unpitched.is_some(), rest.is_some()]
+            .iter()
+            .map(|v| *v as u64)
+            .sum();
+
+        assert_eq!(count, 1, "TODO: Handle wrong amount of objects in pitch");
+
+        Ok(match (pitch, unpitched, rest) {
+            (Some(v), None, None) => Self::Pitch(v),
+            (None, Some(v), None) => Self::Unpitched(v),
+            (None, None, Some(v)) => Self::Rest(v),
+            _ => todo!(),
+        })
+    }
+}
+
+/// https://w3c.github.io/musicxml/musicxml-reference/elements/note/
+#[derive(Debug)]
+pub struct NoteKindStateGrace {
+    pub chord: Option<Chord>,
+    pub kind: NoteKindStatePitchKind,
+    // 0 to 2 times
+    pub tie: Vec<Tie>,
+}
+
+#[derive(Debug)]
+pub struct NoteKindStateGraceCue {
+    pub chord: Option<Chord>,
+    pub kind: NoteKindStatePitchKind,
+}
+
+#[derive(Debug)]
+pub struct NoteKindStateCue {
+    pub chord: Option<Chord>,
+    pub kind: NoteKindStatePitchKind,
+    pub duration: PositiveDivisions,
+}
+
+#[derive(Debug)]
+pub struct NoteKindStateRegular {
+    pub chord: Option<Chord>,
+    pub kind: NoteKindStatePitchKind,
+    pub duration: PositiveDivisions,
+    // 0 to 2 times
+    pub tie: Vec<Tie>,
+}
+
+#[derive(Debug)]
+pub enum NoteKindState {
+    Grace(NoteKindStateGrace),
+    GraceCue(NoteKindStateGraceCue),
+    Cue(NoteKindStateCue),
+    Regular(NoteKindStateRegular),
+}
+
 #[derive(Debug, Eq, PartialEq)]
 pub enum NoteKind {
     Grace,
