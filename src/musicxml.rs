@@ -12,6 +12,8 @@ use quick_xml::{
 pub enum MusicXmlParseError {
     #[error("Missing tag {0:?} at {1:?}")]
     MissingTag(&'static str, Span),
+    #[error("Missing tag end {0:?} at {1:?}")]
+    MissingTagEnd(&'static str, Span),
     #[error("Unexpected end of file")]
     UnexpectedEof,
     #[error(transparent)]
@@ -409,7 +411,7 @@ impl Clef {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Eq, PartialEq)]
 pub enum NoteKind {
     Grace,
     // GraceCue,
@@ -422,7 +424,7 @@ pub enum NoteKind {
 pub struct Note {
     pub pitch: Option<Pitch>,
     pub chord: Option<Chord>,
-    pub duration: PositiveDivisions,
+    pub duration: Option<PositiveDivisions>,
     pub voice: Option<String>,
     pub kind: Option<String>,
     pub stem: Option<String>,
@@ -476,7 +478,7 @@ impl Note {
                 NoteKind::Cue
             }
             _ => {
-                let mut handle_start = |b: &BytesStart<'_>| -> Result<()> {
+                let mut handle_start = |reader: &mut Reader, b: &BytesStart<'_>| -> Result<()> {
                     match b.name().as_ref() {
                         b"pitch" => pitch = Some(Pitch::parse(reader, b)?),
                         b"chord" => chord = Some(Chord::parse(reader, b)?),
@@ -494,13 +496,18 @@ impl Note {
                     Ok(())
                 };
 
-                handle_start(start)?;
+                handle_start(reader, &first)?;
 
                 loop {
                     match reader.read_event()? {
-                        Event::Start(b) => handle_start(&b)?,
+                        Event::Start(b) => handle_start(reader, &b)?,
                         Event::End(b) => {
-                            assert_eq!(b.name(), start.name());
+                            if b.name() != start.name() {
+                                return Err(MusicXmlParseError::MissingTagEnd(
+                                    "Note",
+                                    span_start..reader.buffer_position(),
+                                ));
+                            }
                             break;
                         }
                         Event::Eof => return Err(MusicXmlParseError::UnexpectedEof),
@@ -512,12 +519,12 @@ impl Note {
             }
         };
 
-        let Some(duration) = duration else {
+        if note_kind != NoteKind::Grace && duration.is_none() {
             return Err(MusicXmlParseError::MissingTag(
                 "duration",
                 span_start..reader.buffer_position(),
             ));
-        };
+        }
 
         Ok(Self {
             pitch,
@@ -817,7 +824,7 @@ mod primitive {
         pub fn parse(reader: &mut Reader, start: &BytesStart) -> Option<Self> {
             let txt = reader.read_text(start.name()).unwrap_or_default();
 
-            let step = match txt.as_ref() {
+            let step = match txt.as_ref().trim() {
                 "A" => Step::A,
                 "B" => Step::B,
                 "C" => Step::C,

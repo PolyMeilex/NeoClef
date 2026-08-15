@@ -44,7 +44,30 @@ fn parse(src: &str) -> midly::Smf<'static> {
             match reader.read_event().unwrap() {
                 Event::Start(b) => match b.name().as_ref() {
                     b"score-partwise" => {
-                        let score = musicxml::ScorePartwise::parse(&mut reader, &b).unwrap();
+                        // let score = musicxml::ScorePartwise::parse(&mut reader, &b).unwrap();
+                        let score = match musicxml::ScorePartwise::parse(&mut reader, &b) {
+                            Ok(score) => score,
+                            Err(err) => {
+                                match &err {
+                                    musicxml::MusicXmlParseError::MissingTag(_, span) => {
+                                        println!("{src}");
+                                        println!("==============");
+                                        dbg!(span_to_line_col(src, span.start));
+                                    }
+                                    musicxml::MusicXmlParseError::MissingTagEnd(_, span) => {
+                                        for (idx, line) in src.lines().enumerate() {
+                                            println!("{}: {line}", idx + 1);
+                                        }
+                                        println!("==============");
+                                        dbg!(span_to_line_col(src, span.start));
+                                    }
+                                    musicxml::MusicXmlParseError::UnexpectedEof => {}
+                                    musicxml::MusicXmlParseError::Xml(error) => {}
+                                }
+
+                                panic!("{err}");
+                            }
+                        };
                         break score;
                     }
                     _ => {
@@ -101,7 +124,11 @@ fn parse(src: &str) -> midly::Smf<'static> {
                 // );
             }
             MeasureItem::Note(note) => {
-                let ticks = ((note.duration / divisions) * TICKS_PER_QUARTER_NOTE_F64) as u32;
+                let Some(duration) = note.duration else {
+                    // TODO:
+                    continue;
+                };
+                let ticks = ((duration / divisions) * TICKS_PER_QUARTER_NOTE_F64) as u32;
 
                 if let Some(pitch) = note.pitch.as_ref() {
                     assert!(note.chord.is_none());
@@ -283,7 +310,8 @@ impl<'b> ReaderExt<'b> for quick_xml::reader::Reader<&'b [u8]> {
             .inspect_err(|err| log::error!("{err}"))
             .ok()
             .and_then(|text| {
-                text.parse::<T>()
+                text.trim()
+                    .parse::<T>()
                     .inspect_err(|err| log::error!("{err}"))
                     .ok()
             })
