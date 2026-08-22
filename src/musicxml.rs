@@ -583,7 +583,7 @@ impl Clef {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum NoteKindStatePitchKind {
     Pitch(Pitch),
     Unpitched(String),
@@ -663,7 +663,7 @@ impl NoteKindStatePitchKind {
 }
 
 /// https://w3c.github.io/musicxml/musicxml-reference/elements/note/
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct NoteKindStateGrace {
     pub chord: Option<Chord>,
     pub kind: NoteKindStatePitchKind,
@@ -703,7 +703,7 @@ impl NoteKindStateGrace {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct NoteKindStateGraceCue {
     pub chord: Option<Chord>,
     pub kind: NoteKindStatePitchKind,
@@ -734,7 +734,7 @@ impl<'a> ParseContentFlat<'a> for GraceOrGraceCue {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct NoteKindStateCue {
     pub chord: Option<Chord>,
     pub kind: NoteKindStatePitchKind,
@@ -755,7 +755,7 @@ impl<'a> ParseContentFlat<'a> for NoteKindStateCue {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct NoteKindStateRegular {
     pub chord: Option<Chord>,
     pub kind: NoteKindStatePitchKind,
@@ -780,7 +780,7 @@ impl<'a> ParseContentFlat<'a> for NoteKindStateRegular {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum NoteKindState {
     Grace(NoteKindStateGrace),
     GraceCue(NoteKindStateGraceCue),
@@ -808,6 +808,7 @@ pub struct Note {
     pub rest: Option<Rest>,
     pub tie: Option<Tie>,
     pub note_kind: NoteKind,
+    pub note_kind_v2: NoteKindState,
 }
 
 impl<'a> ParseContent<'a> for Note {
@@ -827,82 +828,56 @@ impl<'a> ParseContent<'a> for Note {
 
         stream.skip_to_end(tag)?;
 
-        match kind {
+        match kind.clone() {
             NoteKindState::Grace(msg) => todo!(),
-            NoteKindState::GraceCue(msg) => todo!(),
+            NoteKindState::GraceCue(msg) => Ok(Self {
+                pitch: match &msg.kind {
+                    NoteKindStatePitchKind::Pitch(pitch) => Some(pitch.clone()),
+                    NoteKindStatePitchKind::Unpitched(_) => todo!(),
+                    NoteKindStatePitchKind::Rest(_) => None,
+                },
+                chord: msg.chord,
+                duration: None,
+                voice: None,
+                kind: None,
+                stem: None,
+                rest: match msg.kind {
+                    NoteKindStatePitchKind::Pitch(_) => None,
+                    NoteKindStatePitchKind::Unpitched(_) => todo!(),
+                    NoteKindStatePitchKind::Rest(rest) => Some(rest),
+                },
+                tie: None,
+                note_kind: NoteKind::Regular,
+                note_kind_v2: kind,
+            }),
             NoteKindState::Cue(msg) => todo!(),
-            NoteKindState::Regular(msg) => {
-                return Ok(Self {
-                    pitch: match &msg.kind {
-                        NoteKindStatePitchKind::Pitch(pitch) => Some(pitch.clone()),
-                        NoteKindStatePitchKind::Unpitched(_) => todo!(),
-                        NoteKindStatePitchKind::Rest(_) => None,
-                    },
-                    chord: msg.chord,
-                    duration: Some(msg.duration),
-                    voice: None,
-                    kind: None,
-                    stem: None,
-                    rest: match msg.kind {
-                        NoteKindStatePitchKind::Pitch(_) => None,
-                        NoteKindStatePitchKind::Unpitched(_) => todo!(),
-                        NoteKindStatePitchKind::Rest(rest) => Some(rest),
-                    },
-                    tie: None,
-                    note_kind: NoteKind::Regular,
-                });
-            }
-        };
-
-        Ok(Self {
-            pitch: None,
-            chord: None,
-            duration: None,
-            voice: None,
-            kind: None,
-            stem: None,
-            rest: None,
-            tie: None,
-            note_kind: NoteKind::Regular,
-        })
+            NoteKindState::Regular(msg) => Ok(Self {
+                pitch: match &msg.kind {
+                    NoteKindStatePitchKind::Pitch(pitch) => Some(pitch.clone()),
+                    NoteKindStatePitchKind::Unpitched(_) => todo!(),
+                    NoteKindStatePitchKind::Rest(_) => None,
+                },
+                chord: msg.chord,
+                duration: Some(msg.duration),
+                voice: None,
+                kind: None,
+                stem: None,
+                rest: match msg.kind {
+                    NoteKindStatePitchKind::Pitch(_) => None,
+                    NoteKindStatePitchKind::Unpitched(_) => todo!(),
+                    NoteKindStatePitchKind::Rest(rest) => Some(rest),
+                },
+                tie: None,
+                note_kind: NoteKind::Regular,
+                note_kind_v2: kind,
+            }),
+        }
     }
 }
 
 impl Note {
     pub fn parse(reader: &mut Reader<'_>, start: &BytesStart) -> Result<Self> {
         let span_start = reader.buffer_position();
-
-        // {
-        //     let tag = reader.next_any();
-        //
-        //     match tag {
-        //         b"grace" => {
-        //             let chord = reader.next_optional("chord");
-        //             let pitch = match reader.next_any() {
-        //                 b"pitch" => {}
-        //                 b"unpitched" => {}
-        //                 b"rest" => {}
-        //                 _ => todo!(),
-        //             };
-        //             let tie = reader.zero_or_more("tie", |reader| {
-        //                 //
-        //             });
-        //         }
-        //         b"cue" => {
-        //             let chord = reader.next_optional("chord");
-        //             let pitch = match reader.next_any() {
-        //                 b"pitch" => {}
-        //                 b"unpitched" => {}
-        //                 b"rest" => {}
-        //                 _ => todo!(),
-        //             };
-        //             let duration = reader.next_required("duration");
-        //         }
-        //         _ => {
-        //             //
-        //         }
-        //     }
-        // }
 
         let mut pitch: Option<Pitch> = None;
         let mut chord: Option<Chord> = None;
@@ -921,65 +896,6 @@ impl Note {
                 "Note",
                 span_start..r.buffer_position(),
             ))?;
-
-        // let note_kind = match first.name().as_ref() {
-        //     b"grace" => {
-        //         if let Some(cue_start) = r.read_start_named(start, b"cue")? {
-        //             // Chord::parse(reader, start);
-        //             r.read_to_end(cue_start.name())?;
-        //
-        //             let _chord = r
-        //                 .read_start_named(start, b"chord")?
-        //                 .map(|chord_start| -> Result<()> {
-        //                     // Chord::parse(reader, start);
-        //                     r.read_to_end(chord_start.name())?;
-        //                     Ok(())
-        //                 })
-        //                 .transpose()?;
-        //
-        //             let pitch_kind = r
-        //                 .read_start(start)?
-        //                 .map(|pitch_kind: BytesStart<'_>| -> Result<_> {
-        //                     match pitch_kind.name().as_ref() {
-        //                         b"pitch" => {
-        //                             r.read_to_end(pitch_kind.name())?;
-        //                             //
-        //                             Ok(Some(NoteKindStatePitchKind::Pitch(todo!())))
-        //                         }
-        //                         b"unpitched" => {
-        //                             r.read_to_end(pitch_kind.name())?;
-        //                             //
-        //                             Ok(Some(NoteKindStatePitchKind::Unpitched(String::new())))
-        //                         }
-        //                         b"rest" => {
-        //                             r.read_to_end(pitch_kind.name())?;
-        //                             //
-        //                             Ok(Some(NoteKindStatePitchKind::Rest(todo!())))
-        //                         }
-        //                         _ => Ok(None),
-        //                     }
-        //                 })
-        //                 .and_then(|res| res.transpose())
-        //                 .ok_or(MusicXmlParseError::MissingTag(
-        //                     "pitch",
-        //                     span_start..r.buffer_position(),
-        //                 ))??;
-        //         }
-        //
-        //         let _chord = r
-        //             .read_start_named(start, b"chord")?
-        //             .map(|chord_start| -> Result<()> {
-        //                 // Chord::parse(reader, start);
-        //                 r.read_to_end(chord_start.name())?;
-        //                 Ok(())
-        //             })
-        //             .transpose()?;
-        //     }
-        //     b"cue" => {}
-        //     _ => {
-        //         //
-        //     }
-        // };
 
         let note_kind = match first.name().as_ref() {
             b"grace" => {
@@ -1045,22 +961,23 @@ impl Note {
             ));
         }
 
-        Ok(Self {
-            pitch,
-            chord,
-            duration,
-            voice,
-            kind,
-            stem,
-            rest,
-            tie,
-            note_kind,
-        })
+        todo!()
+        // Ok(Self {
+        //     pitch,
+        //     chord,
+        //     duration,
+        //     voice,
+        //     kind,
+        //     stem,
+        //     rest,
+        //     tie,
+        //     note_kind,
+        // })
     }
 }
 
 /// https://w3c.github.io/musicxml/musicxml-reference/elements/tie/
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Tie {
     pub kind: StartStop,
     pub time_only: Option<String>,
@@ -1191,7 +1108,7 @@ impl Pitch {
 }
 
 /// https://w3c.github.io/musicxml/musicxml-reference/elements/chord/
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Chord {}
 
 impl<'a> ParseContent<'a> for Chord {
@@ -1213,7 +1130,7 @@ impl Chord {
 }
 
 /// https://w3c.github.io/musicxml/musicxml-reference/elements/rest/
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Rest {
     pub measure: bool,
 }
