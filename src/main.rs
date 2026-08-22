@@ -1,11 +1,19 @@
-#![allow(clippy::single_match)]
+#![allow(clippy::single_match, clippy::let_unit_value)]
 
 mod musicxml;
 
-use std::{collections::BTreeMap, str::FromStr, time::Duration};
+use std::{borrow::Cow, collections::BTreeMap, str::FromStr, time::Duration};
 
 use musicxml::MeasureItem;
-use quick_xml::{events::Event, name::QName};
+use quick_xml::{
+    events::{BytesEnd, BytesStart, BytesText, Event},
+    name::QName,
+    reader::Span,
+};
+
+use crate::musicxml::MusicXmlParseError;
+
+mod parser;
 
 const TICKS_PER_QUARTER_NOTE: u16 = 480;
 const TICKS_PER_QUARTER_NOTE_F64: f64 = TICKS_PER_QUARTER_NOTE as f64;
@@ -160,7 +168,11 @@ fn parse(src: &str) -> midly::Smf<'static> {
                                         dbg!(span_to_line_col(src, span.start));
                                     }
                                     musicxml::MusicXmlParseError::UnexpectedEof => {}
-                                    musicxml::MusicXmlParseError::Xml(error) => {}
+                                    musicxml::MusicXmlParseError::UnexpectedText => {}
+                                    musicxml::MusicXmlParseError::Xml(_error) => {}
+                                    musicxml::MusicXmlParseError::UnexpectedTagEnd(end) => {
+                                        println!("UnexpectedTagEnd: {end:?}");
+                                    }
                                 }
 
                                 panic!("{err}");
@@ -188,6 +200,197 @@ fn parse(src: &str) -> midly::Smf<'static> {
     };
 
     // dbg!(&v);
+
+    println!("===========");
+
+    assert_eq!(v.part.len(), 1);
+
+    let mut iter = v
+        .part
+        .iter()
+        .flat_map(|part| &part.measure)
+        .flat_map(|measure| &measure.content);
+
+    let mut divisions = 1.0;
+    let mut position = 0usize;
+
+    let mut events: BTreeMap<usize, Vec<midly::TrackEvent>> = BTreeMap::new();
+
+    while let Some(item) = iter.next() {
+        println!("{item:#?}");
+
+        match item {
+            MeasureItem::Attributes(attributes) => {
+                if let Some(d) = attributes.divisions.as_ref() {
+                    divisions = *d;
+                }
+
+                // assert_eq!(
+                //     attributes.time,
+                //     vec![musicxml::Time {
+                //         beats: "4".into(),
+                //         beat_type: "4".into(),
+                //     }],
+                // );
+            }
+            MeasureItem::Note(note) => {
+                let Some(duration) = note.duration else {
+                    // TODO:
+                    continue;
+                };
+                let ticks = ((duration / divisions) * TICKS_PER_QUARTER_NOTE_F64) as u32;
+
+                if let Some(pitch) = note.pitch.as_ref() {
+                    assert!(note.chord.is_none());
+
+                    let pitch =
+                        midi_note_number(pitch.step, pitch.octave, pitch.alter.unwrap_or(0.0));
+
+                    let ignore = note
+                        .tie
+                        .as_ref()
+                        .map(|tie| tie.kind == musicxml::StartStop::Stop)
+                        .unwrap_or(false);
+
+                    if !ignore {
+                        events.entry(position).or_default().push(midly::TrackEvent {
+                            delta: 0.into(),
+                            kind: midly::TrackEventKind::Midi {
+                                channel: 0.into(),
+                                message: midly::MidiMessage::NoteOn {
+                                    key: pitch.into(),
+                                    vel: 127.into(),
+                                },
+                            },
+                        });
+                    }
+
+                    let mut off = vec![];
+                    let mut peek_iter = iter.clone();
+                    while let Some(MeasureItem::Note(note)) = peek_iter.next() {
+                        if let Some(pitch) = note.chord.as_ref().and(note.pitch.as_ref()) {
+                            iter.next();
+
+                            let pitch = midi_note_number(
+                                pitch.step,
+                                pitch.octave,
+                                pitch.alter.unwrap_or(0.0),
+                            );
+
+                            off.push(pitch);
+
+                            let ignore = note
+                                .tie
+                                .as_ref()
+                                .map(|tie| tie.kind == musicxml::StartStop::Stop)
+                                .unwrap_or(false);
+
+                            if !ignore {
+                                events.entry(position).or_default().push(midly::TrackEvent {
+                                    delta: 0.into(),
+                                    kind: midly::TrackEventKind::Midi {
+                                        channel: 0.into(),
+                                        message: midly::MidiMessage::NoteOn {
+                                            key: pitch.into(),
+                                            vel: 127.into(),
+                                        },
+                                    },
+                                });
+                            }
+                        } else {
+                            break;
+                        }
+                    }
+
+                    position = position.saturating_add(ticks as usize);
+
+                    if !ignore {
+                        events.entry(position).or_default().push(midly::TrackEvent {
+                            delta: 0.into(),
+                            kind: midly::TrackEventKind::Midi {
+                                channel: 0.into(),
+                                message: midly::MidiMessage::NoteOff {
+                                    key: pitch.into(),
+                                    vel: 0.into(),
+                                },
+                            },
+                        });
+                    }
+
+                    for pitch in off {
+                        events.entry(position).or_default().push(midly::TrackEvent {
+                            delta: 0.into(),
+                            kind: midly::TrackEventKind::Midi {
+                                channel: 0.into(),
+                                message: midly::MidiMessage::NoteOff {
+                                    key: pitch.into(),
+                                    vel: 0.into(),
+                                },
+                            },
+                        });
+                    }
+                } else if note.rest.is_some() {
+                    // TODO: is_measure
+                    position = position.saturating_add(ticks as usize);
+                }
+            }
+            MeasureItem::Backup(backup) => {
+                let duration: f64 = backup.duration;
+
+                let ticks = (duration / divisions) * TICKS_PER_QUARTER_NOTE_F64;
+                position = position.saturating_sub(ticks as usize)
+            }
+            MeasureItem::Print(_) => {}
+            MeasureItem::Barline(_) => {}
+            MeasureItem::Direction(direction) => {
+                if let Some(sound) = direction.sound.as_ref()
+                    && let Some(tempo) = sound.tempo.as_ref()
+                {
+                    let tempo = tempo.round() as u64;
+
+                    let microseconds_per_quarter_note = MINUTE.as_micros() as u64 / tempo;
+                    let microseconds_per_quarter_note = microseconds_per_quarter_note as u32;
+
+                    events.entry(position).or_default().push(midly::TrackEvent {
+                        delta: 0.into(),
+                        kind: midly::TrackEventKind::Meta(midly::MetaMessage::Tempo(
+                            microseconds_per_quarter_note.into(),
+                        )),
+                    });
+                }
+            }
+        }
+    }
+
+    let mut track = vec![];
+
+    let mut prev = 0;
+    for (position, events) in events {
+        let mut delta = position - prev;
+        prev = position;
+
+        for mut event in events {
+            event.delta = (delta as u32).into();
+            track.push(event);
+            delta = 0;
+        }
+    }
+
+    midly::Smf {
+        header: midly::Header {
+            format: midly::Format::SingleTrack,
+            timing: midly::Timing::Metrical(midly::num::u15::new(TICKS_PER_QUARTER_NOTE)),
+        },
+        tracks: vec![track],
+    }
+}
+
+fn parse2(src: &str) -> midly::Smf<'static> {
+    let reader = quick_xml::Reader::from_str(src);
+    let mut stream = parser::XmlStream::new(reader);
+
+    let v: musicxml::ScorePartwise = stream.required(b"score-partwise").unwrap();
+    dbg!(&v);
 
     println!("===========");
 
@@ -408,11 +611,185 @@ impl<'b> ReaderExt<'b> for quick_xml::reader::Reader<&'b [u8]> {
             .inspect_err(|err| log::error!("{err}"))
             .ok()
             .and_then(|text| {
-                text.trim()
+                text.decode()
+                    .expect("TODO")
+                    .trim()
                     .parse::<T>()
                     .inspect_err(|err| log::error!("{err}"))
                     .ok()
             })
+    }
+}
+
+enum DeEvent<'src> {
+    Start(BytesStart<'src>),
+    End(BytesEnd<'src>),
+    Text(BytesText<'src>),
+    Eof,
+}
+
+impl<'src> DeEvent<'src> {
+    pub fn from_event(event: Event<'src>) -> Option<Self> {
+        Some(match event {
+            Event::Start(v) => Self::Start(v),
+            Event::End(v) => Self::End(v),
+            Event::Empty(_) => return None,
+            Event::Text(v) => Self::Text(v),
+            Event::CData(_) => todo!("Apparently this can be text"),
+            Event::Comment(_) => return None,
+            Event::Decl(_) => todo!(),
+            Event::PI(_) => todo!(),
+            Event::DocType(_) => todo!(),
+            Event::GeneralRef(_) => todo!(),
+            Event::Eof => Self::Eof,
+        })
+    }
+
+    pub fn read(reader: &mut Reader<'src>) -> musicxml::Result<Self> {
+        loop {
+            match DeEvent::from_event(reader.read_event()?) {
+                Some(event) => return Ok(event),
+                None => continue,
+            }
+        }
+    }
+}
+
+struct PeakableReader<'reader, 'src> {
+    pub reader: &'reader mut Reader<'src>,
+    /// Remember a peeked value, even if it was None.
+    peeked: Option<DeEvent<'src>>,
+}
+
+impl<'reader, 'src> PeakableReader<'reader, 'src> {
+    pub fn new(reader: &'reader mut Reader<'src>) -> Self {
+        Self {
+            reader,
+            peeked: None,
+        }
+    }
+
+    pub fn next(&mut self) -> musicxml::Result<DeEvent<'src>> {
+        if let Some(next) = self.peeked.take() {
+            return Ok(next);
+        }
+
+        self.next_inner()
+    }
+
+    pub fn peak(&mut self) -> musicxml::Result<&DeEvent<'src>> {
+        #[allow(clippy::unnecessary_unwrap)]
+        if self.peeked.is_some() {
+            return Ok(self.peeked.as_ref().unwrap());
+        }
+
+        let start = self.next_inner()?;
+        self.peeked = Some(start);
+        Ok(self.peeked.as_ref().unwrap())
+    }
+
+    fn next_inner(&mut self) -> musicxml::Result<DeEvent<'src>> {
+        DeEvent::read(self.reader)
+    }
+
+    pub fn buffer_position(&self) -> u64 {
+        self.reader.buffer_position()
+    }
+
+    pub fn read_start(
+        &mut self,
+        _parent: &BytesStart<'_>,
+    ) -> musicxml::Result<Option<BytesStart<'src>>> {
+        match self.peak()? {
+            DeEvent::Start(_) => self
+                .next()
+                .map(|e| match e {
+                    DeEvent::Start(start) => start,
+                    _ => unreachable!(),
+                })
+                .map(Some),
+            DeEvent::End(_end) => Ok(None),
+            DeEvent::Text(_) => Err(MusicXmlParseError::UnexpectedText),
+            DeEvent::Eof => Err(MusicXmlParseError::UnexpectedEof),
+        }
+    }
+
+    pub fn read_start_named(
+        &mut self,
+        _parent: &BytesStart<'_>,
+        name: &[u8],
+    ) -> musicxml::Result<Option<BytesStart<'src>>> {
+        match self.peak()? {
+            DeEvent::Start(v) if v.name().as_ref() == name => self
+                .next()
+                .map(|e| match e {
+                    DeEvent::Start(start) => start,
+                    _ => unreachable!(),
+                })
+                .map(Some),
+            DeEvent::Start(_) => Ok(None),
+            DeEvent::End(_end) => Ok(None),
+            DeEvent::Text(_) => Err(MusicXmlParseError::UnexpectedText),
+            DeEvent::Eof => Err(MusicXmlParseError::UnexpectedEof),
+        }
+    }
+
+    pub fn read_to_end(&mut self, end: QName) -> musicxml::Result<Span> {
+        Ok(self.reader.read_to_end(end)?)
+    }
+}
+
+#[derive(Debug)]
+enum DocumentElement<'a> {
+    Child(Document<'a>),
+    Text(Cow<'a, str>),
+}
+
+#[derive(Debug)]
+struct Document<'a> {
+    start: BytesStart<'a>,
+    events: Vec<DocumentElement<'a>>,
+}
+
+impl<'a> Document<'a> {
+    fn new(start: BytesStart<'a>) -> Self {
+        Self {
+            start,
+            events: Vec::new(),
+        }
+    }
+
+    fn read(reader: &mut Reader<'a>, start: BytesStart<'a>) -> quick_xml::Result<Self> {
+        let mut document = Self::new(start);
+
+        loop {
+            let event = reader.read_event()?;
+            match event {
+                Event::Start(start) => {
+                    let child = Document::read(reader, start)?;
+                    document.events.push(DocumentElement::Child(child));
+                    continue;
+                }
+                Event::End(end) => {
+                    break;
+                }
+                Event::Empty(_) => unreachable!(),
+                Event::Text(text) => {
+                    let text = text.decode().unwrap();
+                    document.events.push(DocumentElement::Text(text));
+                    continue;
+                }
+                Event::CData(bytes_cdata) => todo!(),
+                Event::Comment(bytes_text) => todo!(),
+                Event::Decl(bytes_decl) => todo!(),
+                Event::PI(bytes_pi) => todo!(),
+                Event::DocType(bytes_text) => todo!(),
+                Event::GeneralRef(bytes_ref) => todo!(),
+                Event::Eof => break,
+            }
+        }
+
+        Ok(document)
     }
 }
 
@@ -424,6 +801,76 @@ mod tests {
         ( $($t:tt)* ) => {
             stringify!($($t)*)
         };
+    }
+
+    #[test]
+    fn cba() {
+        let src = include_str!("../test-files/lg-688205918141534853.xml");
+        let src = r#"
+          <note>
+            <pitch>
+              <step>G</step>
+              <octave>4</octave>
+            </pitch>
+            <duration>1</duration>
+          </note>
+        "#;
+
+        let mut reader = quick_xml::Reader::from_str(src);
+        let mut stream = parser::XmlStream::new(reader);
+
+        let note: musicxml::Note = stream.required(b"note").unwrap();
+    }
+
+    #[test]
+    fn abc() {
+        let src = include_str!("../test-files/lg-688205918141534853.xml");
+
+        let mut reader = quick_xml::Reader::from_str(src);
+        //         let mut reader = quick_xml::Reader::from_str(
+        //             r#"
+        // <abc key="value">
+        //     <cba>
+        //         Inner Most
+        //     </cba>
+        // </abc>
+        // "#,
+        //         );
+        // reader.config_mut().trim_text(true);
+        reader.config_mut().expand_empty_elements = true;
+        reader.config_mut().trim_text_start = true;
+        reader.config_mut().trim_text_end = true;
+
+        let start = loop {
+            let event = reader.read_event().unwrap();
+            match event {
+                Event::Start(start) => break start,
+                Event::End(bytes_end) => todo!(),
+                Event::Empty(bytes_start) => todo!(),
+                Event::Text(bytes_text) => {}
+                Event::CData(bytes_cdata) => todo!(),
+                Event::Comment(bytes_text) => todo!(),
+                Event::Decl(_decl) => {}
+                Event::PI(bytes_pi) => todo!(),
+                Event::DocType(bytes_text) => {
+                    // TODO: MusicXML version is here
+                }
+                Event::GeneralRef(bytes_ref) => todo!(),
+                Event::Eof => todo!(),
+            }
+        };
+
+        let doc = Document::read(&mut reader, start).unwrap();
+
+        // dbg!(&doc);
+
+        // loop {
+        //     let event = reader.read_event().unwrap();
+        //     dbg!(&event);
+        //     if event == Event::Eof {
+        //         break;
+        //     }
+        // }
     }
 
     #[test]
@@ -497,7 +944,8 @@ mod tests {
             </score-partwise>
         );
 
-        let midi = parse(src);
+        let src = simple_xml_format(src);
+        let midi = parse2(&src);
         insta::assert_debug_snapshot!(midi);
     }
 
@@ -627,7 +1075,7 @@ mod tests {
         </score-partwise>
         );
 
-        let midi = parse(src);
+        let midi = parse2(src);
         insta::assert_debug_snapshot!(midi);
     }
 

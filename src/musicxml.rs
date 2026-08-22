@@ -4,7 +4,7 @@ use std::str::FromStr;
 
 use log::error;
 use quick_xml::{
-    events::{BytesStart, Event},
+    events::{BytesEnd, BytesStart, Event},
     reader::Span,
 };
 
@@ -14,8 +14,12 @@ pub enum MusicXmlParseError {
     MissingTag(&'static str, Span),
     #[error("Missing tag end {0:?} at {1:?}")]
     MissingTagEnd(&'static str, Span),
+    #[error("Unexpected tag end")]
+    UnexpectedTagEnd(BytesEnd<'static>),
     #[error("Unexpected end of file")]
     UnexpectedEof,
+    #[error("Unexpected text")]
+    UnexpectedText,
     #[error(transparent)]
     Xml(#[from] quick_xml::errors::Error),
 }
@@ -26,6 +30,27 @@ pub type Result<T, E = MusicXmlParseError> = std::result::Result<T, E>;
 #[derive(Debug)]
 pub struct ScorePartwise {
     pub part: Vec<Part>,
+}
+
+impl<'a> ParseContent<'a> for ScorePartwise {
+    fn parse(
+        stream: &mut XmlStream<'a>,
+        tag: &[u8],
+        _start: &BytesStart<'a>,
+    ) -> Result<Self, parser::Error> {
+        let _work = stream.optional::<()>(b"work")?;
+        let _movement_number = stream.optional::<()>(b"movement-number")?;
+        let _movement_title = stream.optional::<()>(b"movement-title")?;
+        let _identification = stream.optional::<()>(b"identification")?;
+        let _defaults = stream.optional::<()>(b"defaults")?;
+        let _credit = stream.zero_or_more::<()>(b"credit")?;
+        let _part_list = stream.required::<()>(b"part-list")?;
+        let part = stream.one_or_more::<Part>(b"part")?;
+
+        stream.skip_to_end(tag)?;
+
+        Ok(Self { part })
+    }
 }
 
 impl ScorePartwise {
@@ -58,6 +83,20 @@ pub struct Part {
     pub measure: Vec<Measure>,
 }
 
+impl<'a> ParseContent<'a> for Part {
+    fn parse(
+        stream: &mut XmlStream<'a>,
+        tag: &[u8],
+        _start: &BytesStart<'a>,
+    ) -> Result<Self, parser::Error> {
+        let measure = stream.one_or_more::<Measure>(b"measure")?;
+
+        stream.skip_to_end(tag)?;
+
+        Ok(Self { measure })
+    }
+}
+
 impl Part {
     pub fn parse(reader: &mut Reader, start: &BytesStart) -> Result<Self> {
         let mut measure = Vec::new();
@@ -86,6 +125,50 @@ impl Part {
 #[derive(Debug)]
 pub struct Measure {
     pub content: Vec<MeasureItem>,
+}
+
+impl<'a> ParseContent<'a> for Measure {
+    fn parse(
+        stream: &mut XmlStream<'a>,
+        tag: &[u8],
+        start: &BytesStart<'a>,
+    ) -> Result<Self, parser::Error> {
+        let mut content = Vec::new();
+        while let Some(tag) = stream.peek_tag()? {
+            match tag {
+                b"print" => {
+                    // content.push(MeasureItem::Print(Print::parse(reader, &b)));
+                    todo!();
+                }
+                b"attributes" => {
+                    content.push(MeasureItem::Attributes(stream.required(b"attributes")?));
+                }
+                b"note" => {
+                    content.push(MeasureItem::Note(stream.required(b"note")?));
+                }
+                b"barline" => {
+                    // content.push(MeasureItem::Barline(Barline::parse(reader, &b)));
+                    todo!();
+                }
+                b"backup" => {
+                    content.push(MeasureItem::Backup(stream.required(b"backup")?));
+                }
+                b"direction" => {
+                    // content.push(MeasureItem::Direction(Direction::parse(reader, &b)?));
+                    todo!();
+                }
+                tag => {
+                    let tag = tag.to_vec();
+                    stream.required::<()>(&tag)?;
+                }
+                _ => {}
+            }
+        }
+
+        stream.skip_to_end(tag)?;
+
+        Ok(Self { content })
+    }
 }
 
 impl Measure {
@@ -159,6 +242,33 @@ pub struct Attributes {
     pub clef: Vec<Clef>,
 }
 
+impl<'a> ParseContent<'a> for Attributes {
+    fn parse(
+        stream: &mut XmlStream<'a>,
+        tag: &[u8],
+        start: &BytesStart<'a>,
+    ) -> Result<Self, parser::Error> {
+        let _footnote = stream.optional::<()>(b"footnote")?;
+        let _level = stream.optional::<()>(b"level")?;
+        let divisions = stream.optional::<PositiveDivisions>(b"divisions")?;
+        let key = stream.zero_or_more::<Key>(b"key")?;
+        let time = stream.zero_or_more::<Time>(b"time")?;
+        let _staves = stream.optional::<()>(b"staves")?;
+        let _part_symbol = stream.optional::<()>(b"part-symbol")?;
+        let _instruments = stream.optional::<()>(b"instruments")?;
+        let clef = stream.zero_or_more::<Clef>(b"clef")?;
+
+        stream.skip_to_end(tag)?;
+
+        Ok(Self {
+            divisions,
+            key,
+            time,
+            clef,
+        })
+    }
+}
+
 impl Attributes {
     pub fn parse(reader: &mut Reader, start: &BytesStart) -> Result<Self> {
         let mut divisions: Option<PositiveDivisions> = None;
@@ -210,6 +320,20 @@ impl Barline {
 #[derive(Debug)]
 pub struct Backup {
     pub duration: PositiveDivisions,
+}
+
+impl<'a> ParseContent<'a> for Backup {
+    fn parse(
+        stream: &mut XmlStream<'a>,
+        tag: &[u8],
+        start: &BytesStart<'a>,
+    ) -> Result<Self, parser::Error> {
+        let duration = stream.required(b"duration")?;
+
+        stream.skip_to_end(tag)?;
+
+        Ok(Self { duration })
+    }
 }
 
 impl Backup {
@@ -306,6 +430,21 @@ pub struct Key {
     pub fifths: String,
 }
 
+impl<'a> ParseContent<'a> for Key {
+    fn parse(
+        stream: &mut XmlStream<'a>,
+        tag: &[u8],
+        start: &BytesStart<'a>,
+    ) -> Result<Self, parser::Error> {
+        // TODO: real parser
+        let fifths = stream.required(b"fifths")?;
+
+        stream.skip_to_end(tag)?;
+
+        Ok(Self { fifths })
+    }
+}
+
 impl Key {
     pub fn parse(reader: &mut Reader, start: &BytesStart) -> Result<Self> {
         let start_span = reader.buffer_position();
@@ -345,6 +484,22 @@ pub struct Time {
     pub beat_type: String,
 }
 
+impl<'a> ParseContent<'a> for Time {
+    fn parse(
+        stream: &mut XmlStream<'a>,
+        tag: &[u8],
+        start: &BytesStart<'a>,
+    ) -> Result<Self, parser::Error> {
+        // TODO: real parser
+        let beats = stream.required(b"beats")?;
+        let beat_type = stream.required(b"beat-type")?;
+
+        stream.skip_to_end(tag)?;
+
+        Ok(Self { beats, beat_type })
+    }
+}
+
 impl Time {
     pub fn parse(reader: &mut Reader, start: &BytesStart) -> Result<Self> {
         let mut beats = None;
@@ -368,8 +523,8 @@ impl Time {
             }
         }
 
-        let beats = beats.unwrap().to_string();
-        let beat_type = beat_type.unwrap().to_string();
+        let beats = beats.unwrap().decode().expect("TODO").to_string();
+        let beat_type = beat_type.unwrap().decode().expect("TODO").to_string();
 
         Ok(Self { beats, beat_type })
     }
@@ -380,6 +535,23 @@ impl Time {
 pub struct Clef {
     pub sign: ClefSign,
     pub line: Option<StaffLinePosition>,
+}
+
+impl<'a> ParseContent<'a> for Clef {
+    fn parse(
+        stream: &mut XmlStream<'a>,
+        tag: &[u8],
+        start: &BytesStart<'a>,
+    ) -> Result<Self, parser::Error> {
+        // TODO: real parser
+        let sign = stream.required(b"sign")?;
+        let line = stream.optional(b"line")?;
+        let _clef_octave_change = stream.optional::<()>(b"clef-octave-change")?;
+
+        stream.skip_to_end(tag)?;
+
+        Ok(Self { sign, line })
+    }
 }
 
 impl Clef {
@@ -418,6 +590,29 @@ pub enum NoteKindStatePitchKind {
     Rest(Rest),
 }
 
+impl<'a> ParseContentFlat<'a> for NoteKindStatePitchKind {
+    fn parse(stream: &mut XmlStream<'a>) -> Result<Self, crate::parser::Error> {
+        let kind = match stream.peek_tag()? {
+            Some(b"pitch") => Self::Pitch(stream.required(b"pitch")?),
+            Some(b"unpitched") => Self::Unpitched(stream.required(b"unpitched")?),
+            Some(b"rest") => Self::Rest(stream.required(b"rest")?),
+            Some(unknown) => {
+                return Err(parser::Error::UnexpectedEvent(format!(
+                    "Invalid choice: {:?}",
+                    String::from_utf8_lossy(unknown)
+                )));
+            }
+            None => {
+                return Err(parser::Error::MissingElement(
+                    "Expected choice element in note".into(),
+                ));
+            }
+        };
+
+        Ok(kind)
+    }
+}
+
 impl NoteKindStatePitchKind {
     pub fn parse(reader: &mut Reader, start: &BytesStart) -> Result<Self> {
         let mut pitch: Option<Pitch> = None;
@@ -428,7 +623,15 @@ impl NoteKindStatePitchKind {
             match reader.read_event()? {
                 Event::Start(b) => match b.name().as_ref() {
                     b"pitch" => pitch = Some(Pitch::parse(reader, &b)?),
-                    b"unpitched" => unpitched = Some(reader.read_text(b.name())?.to_string()),
+                    b"unpitched" => {
+                        unpitched = Some(
+                            reader
+                                .read_text(b.name())?
+                                .decode()
+                                .expect("TODO")
+                                .to_string(),
+                        )
+                    }
                     b"rest" => rest = Some(Rest::parse(reader, &b)),
                     _ => {
                         reader.read_to_end(b.name()).unwrap();
@@ -507,10 +710,49 @@ pub struct NoteKindStateGraceCue {
 }
 
 #[derive(Debug)]
+enum GraceOrGraceCue {
+    Grace(NoteKindStateGrace),
+    GraceCue(NoteKindStateGraceCue),
+}
+
+impl<'a> ParseContentFlat<'a> for GraceOrGraceCue {
+    fn parse(stream: &mut XmlStream<'a>) -> std::prelude::v1::Result<Self, parser::Error> {
+        let _grace: () = stream.required(b"grace")?;
+        match stream.optional::<()>(b"cue")? {
+            Some(_) => {
+                let chord = stream.optional(b"chord")?;
+                let kind = stream.flatten()?;
+                Ok(Self::GraceCue(NoteKindStateGraceCue { chord, kind }))
+            }
+            None => {
+                let chord = stream.optional(b"chord")?;
+                let kind = stream.flatten()?;
+                let tie = stream.zero_or_more(b"tie")?;
+                Ok(Self::Grace(NoteKindStateGrace { chord, kind, tie }))
+            }
+        }
+    }
+}
+
+#[derive(Debug)]
 pub struct NoteKindStateCue {
     pub chord: Option<Chord>,
     pub kind: NoteKindStatePitchKind,
     pub duration: PositiveDivisions,
+}
+
+impl<'a> ParseContentFlat<'a> for NoteKindStateCue {
+    fn parse(stream: &mut XmlStream<'a>) -> Result<Self, parser::Error> {
+        let _cue: () = stream.required(b"cue")?;
+        let chord = stream.optional(b"chord")?;
+        let kind = stream.flatten()?;
+        let duration = stream.required(b"duration")?;
+        Ok(Self {
+            chord,
+            kind,
+            duration,
+        })
+    }
 }
 
 #[derive(Debug)]
@@ -520,6 +762,22 @@ pub struct NoteKindStateRegular {
     pub duration: PositiveDivisions,
     // 0 to 2 times
     pub tie: Vec<Tie>,
+}
+
+impl<'a> ParseContentFlat<'a> for NoteKindStateRegular {
+    fn parse(stream: &mut XmlStream<'a>) -> Result<Self, parser::Error> {
+        let chord = stream.optional(b"chord")?;
+        let kind = stream.flatten()?;
+        let duration = stream.required(b"duration")?;
+        let tie = stream.zero_or_more(b"tie")?;
+
+        Ok(Self {
+            chord,
+            kind,
+            duration,
+            tie,
+        })
+    }
 }
 
 #[derive(Debug)]
@@ -538,20 +796,6 @@ pub enum NoteKind {
     Regular,
 }
 
-impl NoteKind {
-    pub fn parse_grace(reader: &mut Reader, grace_tag: &BytesStart) -> Result<Self> {
-        todo!()
-    }
-
-    pub fn parse_cue(reader: &mut Reader, cue_tag: &BytesStart) -> Result<Self> {
-        todo!()
-    }
-
-    pub fn parse_regular(reader: &mut Reader, first_child_tag: &BytesStart) -> Result<Self> {
-        todo!()
-    }
-}
-
 /// https://w3c.github.io/musicxml/musicxml-reference/elements/note/
 #[derive(Debug)]
 pub struct Note {
@@ -566,9 +810,99 @@ pub struct Note {
     pub note_kind: NoteKind,
 }
 
+impl<'a> ParseContent<'a> for Note {
+    fn parse(
+        stream: &mut XmlStream<'a>,
+        tag: &[u8],
+        _start: &BytesStart<'a>,
+    ) -> Result<Self, crate::parser::Error> {
+        let kind = match stream.peek_tag()? {
+            Some(b"grace") => match stream.flatten::<GraceOrGraceCue>()? {
+                GraceOrGraceCue::Grace(v) => NoteKindState::Grace(v),
+                GraceOrGraceCue::GraceCue(v) => NoteKindState::GraceCue(v),
+            },
+            Some(b"cue") => NoteKindState::Cue(stream.flatten::<NoteKindStateCue>()?),
+            _ => NoteKindState::Regular(stream.flatten::<NoteKindStateRegular>()?),
+        };
+
+        stream.skip_to_end(tag)?;
+
+        match kind {
+            NoteKindState::Grace(msg) => todo!(),
+            NoteKindState::GraceCue(msg) => todo!(),
+            NoteKindState::Cue(msg) => todo!(),
+            NoteKindState::Regular(msg) => {
+                return Ok(Self {
+                    pitch: match &msg.kind {
+                        NoteKindStatePitchKind::Pitch(pitch) => Some(pitch.clone()),
+                        NoteKindStatePitchKind::Unpitched(_) => todo!(),
+                        NoteKindStatePitchKind::Rest(_) => None,
+                    },
+                    chord: msg.chord,
+                    duration: Some(msg.duration),
+                    voice: None,
+                    kind: None,
+                    stem: None,
+                    rest: match msg.kind {
+                        NoteKindStatePitchKind::Pitch(_) => None,
+                        NoteKindStatePitchKind::Unpitched(_) => todo!(),
+                        NoteKindStatePitchKind::Rest(rest) => Some(rest),
+                    },
+                    tie: None,
+                    note_kind: NoteKind::Regular,
+                });
+            }
+        };
+
+        Ok(Self {
+            pitch: None,
+            chord: None,
+            duration: None,
+            voice: None,
+            kind: None,
+            stem: None,
+            rest: None,
+            tie: None,
+            note_kind: NoteKind::Regular,
+        })
+    }
+}
+
 impl Note {
-    pub fn parse(reader: &mut Reader, start: &BytesStart) -> Result<Self> {
+    pub fn parse(reader: &mut Reader<'_>, start: &BytesStart) -> Result<Self> {
         let span_start = reader.buffer_position();
+
+        // {
+        //     let tag = reader.next_any();
+        //
+        //     match tag {
+        //         b"grace" => {
+        //             let chord = reader.next_optional("chord");
+        //             let pitch = match reader.next_any() {
+        //                 b"pitch" => {}
+        //                 b"unpitched" => {}
+        //                 b"rest" => {}
+        //                 _ => todo!(),
+        //             };
+        //             let tie = reader.zero_or_more("tie", |reader| {
+        //                 //
+        //             });
+        //         }
+        //         b"cue" => {
+        //             let chord = reader.next_optional("chord");
+        //             let pitch = match reader.next_any() {
+        //                 b"pitch" => {}
+        //                 b"unpitched" => {}
+        //                 b"rest" => {}
+        //                 _ => todo!(),
+        //             };
+        //             let duration = reader.next_required("duration");
+        //         }
+        //         _ => {
+        //             //
+        //         }
+        //     }
+        // }
 
         let mut pitch: Option<Pitch> = None;
         let mut chord: Option<Chord> = None;
@@ -579,31 +913,73 @@ impl Note {
         let mut rest: Option<Rest> = None;
         let mut tie: Option<Tie> = None;
 
-        let first = loop {
-            match reader.read_event()? {
-                Event::Start(b) => break b,
-                Event::End(b) => {
-                    assert_eq!(b.name(), start.name());
-                    // TODO: Wrong name
-                    return Err(MusicXmlParseError::MissingTag(
-                        "note",
-                        span_start..reader.buffer_position(),
-                    ));
-                }
-                Event::Eof => return Err(MusicXmlParseError::UnexpectedEof),
-                _ => {}
-            }
-        };
+        let mut r = PeakableReader::new(reader);
 
-        let note_kind = match first.name().as_ref() {
-            b"grace" => {
-                NoteKind::parse_grace(reader, &first);
-            }
-            b"cue" => {}
-            _ => {
-                //
-            }
-        };
+        let first = r
+            .read_start(start)?
+            .ok_or(MusicXmlParseError::MissingTagEnd(
+                "Note",
+                span_start..r.buffer_position(),
+            ))?;
+
+        // let note_kind = match first.name().as_ref() {
+        //     b"grace" => {
+        //         if let Some(cue_start) = r.read_start_named(start, b"cue")? {
+        //             // Chord::parse(reader, start);
+        //             r.read_to_end(cue_start.name())?;
+        //
+        //             let _chord = r
+        //                 .read_start_named(start, b"chord")?
+        //                 .map(|chord_start| -> Result<()> {
+        //                     // Chord::parse(reader, start);
+        //                     r.read_to_end(chord_start.name())?;
+        //                     Ok(())
+        //                 })
+        //                 .transpose()?;
+        //
+        //             let pitch_kind = r
+        //                 .read_start(start)?
+        //                 .map(|pitch_kind: BytesStart<'_>| -> Result<_> {
+        //                     match pitch_kind.name().as_ref() {
+        //                         b"pitch" => {
+        //                             r.read_to_end(pitch_kind.name())?;
+        //                             //
+        //                             Ok(Some(NoteKindStatePitchKind::Pitch(todo!())))
+        //                         }
+        //                         b"unpitched" => {
+        //                             r.read_to_end(pitch_kind.name())?;
+        //                             //
+        //                             Ok(Some(NoteKindStatePitchKind::Unpitched(String::new())))
+        //                         }
+        //                         b"rest" => {
+        //                             r.read_to_end(pitch_kind.name())?;
+        //                             //
+        //                             Ok(Some(NoteKindStatePitchKind::Rest(todo!())))
+        //                         }
+        //                         _ => Ok(None),
+        //                     }
+        //                 })
+        //                 .and_then(|res| res.transpose())
+        //                 .ok_or(MusicXmlParseError::MissingTag(
+        //                     "pitch",
+        //                     span_start..r.buffer_position(),
+        //                 ))??;
+        //         }
+        //
+        //         let _chord = r
+        //             .read_start_named(start, b"chord")?
+        //             .map(|chord_start| -> Result<()> {
+        //                 // Chord::parse(reader, start);
+        //                 r.read_to_end(chord_start.name())?;
+        //                 Ok(())
+        //             })
+        //             .transpose()?;
+        //     }
+        //     b"cue" => {}
+        //     _ => {
+        //         //
+        //     }
+        // };
 
         let note_kind = match first.name().as_ref() {
             b"grace" => {
@@ -690,6 +1066,22 @@ pub struct Tie {
     pub time_only: Option<String>,
 }
 
+impl<'a> ParseContent<'a> for Tie {
+    fn parse(
+        stream: &mut XmlStream<'a>,
+        tag: &[u8],
+        start: &BytesStart<'a>,
+    ) -> Result<Self, parser::Error> {
+        stream.skip_to_end(tag)?;
+
+        // TODO: Attributes
+        Ok(Self {
+            kind: StartStop::Stop,
+            time_only: None,
+        })
+    }
+}
+
 impl Tie {
     pub fn parse(reader: &mut Reader, start: &BytesStart) -> Self {
         let mut kind: Option<StartStop> = None;
@@ -735,11 +1127,31 @@ impl StartStop {
 }
 
 /// https://w3c.github.io/musicxml/musicxml-reference/elements/pitch/
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Pitch {
     pub step: Step,
     pub alter: Option<Semitones>,
     pub octave: Octave,
+}
+
+impl<'a> ParseContent<'a> for Pitch {
+    fn parse(
+        stream: &mut XmlStream<'a>,
+        tag: &[u8],
+        start: &BytesStart<'a>,
+    ) -> std::result::Result<Self, crate::parser::Error> {
+        let step = stream.required(b"step")?;
+        // TODO: Alter
+        let octave = stream.required(b"octave")?;
+
+        stream.skip_to_end(tag)?;
+
+        Ok(Pitch {
+            step,
+            alter: None,
+            octave,
+        })
+    }
 }
 
 impl Pitch {
@@ -782,6 +1194,17 @@ impl Pitch {
 #[derive(Debug)]
 pub struct Chord {}
 
+impl<'a> ParseContent<'a> for Chord {
+    fn parse(
+        stream: &mut XmlStream<'a>,
+        tag: &[u8],
+        _start: &BytesStart<'a>,
+    ) -> Result<Self, parser::Error> {
+        stream.skip_to_end(tag)?;
+        Ok(Self {})
+    }
+}
+
 impl Chord {
     pub fn parse(reader: &mut Reader, start: &BytesStart) -> Result<Self> {
         reader.read_to_end(start.name())?;
@@ -793,6 +1216,18 @@ impl Chord {
 #[derive(Debug)]
 pub struct Rest {
     pub measure: bool,
+}
+
+impl<'a> ParseContent<'a> for Rest {
+    fn parse(
+        stream: &mut XmlStream<'a>,
+        tag: &[u8],
+        _start: &BytesStart<'a>,
+    ) -> Result<Self, crate::parser::Error> {
+        stream.skip_to_end(tag)?;
+        // TODO:
+        Ok(Self { measure: false })
+    }
 }
 
 impl Rest {
@@ -814,9 +1249,14 @@ impl Rest {
 
 pub use primitive::*;
 
-use crate::{Reader, ReaderExt};
+use crate::{
+    DeEvent, PeakableReader, Reader, ReaderExt,
+    parser::{self, ParseContent, ParseContentFlat, XmlStream},
+};
 mod primitive {
     #![allow(unused)]
+
+    use std::borrow::Cow;
 
     use super::*;
 
@@ -963,9 +1403,39 @@ mod primitive {
         G,
     }
 
+    impl<'a> ParseContent<'a> for Step {
+        fn parse(
+            stream: &mut XmlStream<'a>,
+            tag: &[u8],
+            start: &BytesStart<'a>,
+        ) -> std::result::Result<Self, crate::parser::Error> {
+            let str = Cow::<str>::parse(stream, tag, start)?;
+
+            let step = match str.trim() {
+                "A" => Step::A,
+                "B" => Step::B,
+                "C" => Step::C,
+                "D" => Step::D,
+                "E" => Step::E,
+                "F" => Step::F,
+                "G" => Step::G,
+                other => {
+                    error!("Unexpected step value: {other}");
+                    todo!();
+                }
+            };
+
+            Ok(step)
+        }
+    }
+
     impl Step {
         pub fn parse(reader: &mut Reader, start: &BytesStart) -> Option<Self> {
-            let txt = reader.read_text(start.name()).unwrap_or_default();
+            let txt = reader
+                .read_text(start.name())
+                .expect("TODO")
+                .decode()
+                .expect("TODO");
 
             let step = match txt.as_ref().trim() {
                 "A" => Step::A,
@@ -995,6 +1465,17 @@ mod primitive {
         Tab,
         Jianpu,
         None,
+    }
+
+    impl<'a> ParseContent<'a> for ClefSign {
+        fn parse(
+            stream: &mut XmlStream<'a>,
+            tag: &[u8],
+            start: &BytesStart<'a>,
+        ) -> Result<Self, parser::Error> {
+            let v = Cow::<str>::parse(stream, tag, start)?;
+            v.parse::<Self>().map_err(parser::Error::UnexpectedValue)
+        }
     }
 
     impl FromStr for ClefSign {
