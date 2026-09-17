@@ -5,11 +5,15 @@ edition = "2024"
 
 [dependencies]
 midly = "0.5.3"
-quick-xml = { version = "0.37.5", features = ["serialize", "serde-types", "overlapped-lists"] }
-serde = { version = "1.0.219", features = ["derive"] }
+quick-xml = "0.41.0"
+thiserror = "2.0.18"
+log = "0.4.29"
+env_logger = "0.11.8"
+miette = { version = "7.6.0", features = ["fancy"] }
 
 [dev-dependencies]
 insta = "1.43.1"
+zip = { version = "8.6.0", default-features = false, features = ["deflate"] }
 
 [profile.dev.package]
 insta.opt-level = 3
