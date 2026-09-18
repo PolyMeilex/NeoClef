@@ -178,6 +178,14 @@ impl<'a> XmlStream<'a> {
         }
     }
 
+    pub fn peek_tag_full(&mut self) -> Result<Option<&BytesStart<'_>>, Error> {
+        self.skip_whitespace()?;
+        match self.peek()? {
+            Event::Start(e) | Event::Empty(e) => Ok(Some(e)),
+            _ => Ok(None),
+        }
+    }
+
     pub fn flatten<T: ParseContentFlat<'a>>(&mut self) -> Result<T, Error> {
         T::parse(self)
     }
