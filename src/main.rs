@@ -188,7 +188,6 @@ fn parse(src: &str) -> Result<midly::Smf<'static>, parser::Error> {
                             });
                     }
                 } else if matches!(msg.kind, musicxml::NoteKindStatePitchKind::Rest(_)) {
-                    // TODO: is_measure
                     position += quarters;
                 }
             }
@@ -785,6 +784,50 @@ mod tests {
               </direction>
               <note>
                 <pitch><step>F</step><octave>4</octave></pitch>
+                <duration>4</duration>
+              </note>
+            </measure>
+          </part>
+        </score-partwise>
+        );
+
+        let src = simple_xml_format(src);
+        let midi = parse(&src).unwrap();
+        insta::assert_debug_snapshot!(midi);
+    }
+
+    #[test]
+    fn measure_rest() {
+        let src = xml!(
+        <score-partwise version="4.0">
+          <part-list>
+            <score-part id="P1">
+              <part-name>Piano</part-name>
+            </score-part>
+          </part-list>
+          <part id="P1">
+            <measure number="1">
+              <attributes>
+                <divisions>1</divisions>
+                <time>
+                  <beats>4</beats>
+                  <beat-type>4</beat-type>
+                </time>
+              </attributes>
+              <note>
+                <rest measure="yes"/>
+                <duration>4</duration>
+              </note>
+            </measure>
+            <measure number="2">
+              <note>
+                <rest measure="yes"/>
+                <duration>8</duration>
+              </note>
+            </measure>
+            <measure number="3">
+              <note>
+                <pitch><step>C</step><octave>4</octave></pitch>
                 <duration>4</duration>
               </note>
             </measure>

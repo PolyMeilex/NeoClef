@@ -1,0 +1,55 @@
+---
+source: src/main.rs
+assertion_line: 843
+expression: midi
+---
+Smf {
+    header: Header {
+        format: SingleTrack,
+        timing: Metrical(
+            u15(
+                480,
+            ),
+        ),
+    },
+    tracks: [
+        [
+            TrackEvent {
+                delta: u28(
+                    5760,
+                ),
+                kind: Midi {
+                    channel: u4(
+                        0,
+                    ),
+                    message: NoteOn {
+                        key: u7(
+                            60,
+                        ),
+                        vel: u7(
+                            90,
+                        ),
+                    },
+                },
+            },
+            TrackEvent {
+                delta: u28(
+                    1920,
+                ),
+                kind: Midi {
+                    channel: u4(
+                        0,
+                    ),
+                    message: NoteOff {
+                        key: u7(
+                            60,
+                        ),
+                        vel: u7(
+                            0,
+                        ),
+                    },
+                },
+            },
+        ],
+    ],
+}
