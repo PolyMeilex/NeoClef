@@ -1,7 +1,7 @@
 ---
 source: src/main.rs
-assertion_line: 988
-expression: midi
+assertion_line: 990
+expression: "parse(&src, false).unwrap()"
 ---
 Smf {
     header: Header {
@@ -114,7 +114,7 @@ Smf {
                 kind: Meta(
                     Tempo(
                         u24(
-                            857142,
+                            857143,
                         ),
                     ),
                 ),

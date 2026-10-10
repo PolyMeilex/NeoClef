@@ -1,6 +1,6 @@
 ---
 source: src/main.rs
-assertion_line: 872
+assertion_line: 875
 expression: midi
 ---
 Smf {
@@ -86,7 +86,7 @@ Smf {
                 kind: Meta(
                     Tempo(
                         u24(
-                            666666,
+                            666667,
                         ),
                     ),
                 ),
@@ -3194,7 +3194,7 @@ Smf {
                 kind: Meta(
                     Tempo(
                         u24(
-                            652173,
+                            652174,
                         ),
                     ),
                 ),
@@ -19262,7 +19262,7 @@ Smf {
                 kind: Meta(
                     Tempo(
                         u24(
-                            631578,
+                            631579,
                         ),
                     ),
                 ),
@@ -21842,7 +21842,7 @@ Smf {
                 kind: Meta(
                     Tempo(
                         u24(
-                            631578,
+                            631579,
                         ),
                     ),
                 ),

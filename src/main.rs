@@ -35,12 +35,12 @@ fn main() -> miette::Result<()> {
 
     // let src = std::fs::read_to_string("./schema/1.musicxml").unwrap();
     let src = std::fs::read_to_string("./schema/ODDTAXI.musicxml").unwrap();
-    let smf = parse(&src)?;
+    let smf = parse(&src, false)?;
     smf.save("out.mid").unwrap();
     Ok(())
 }
 
-fn parse(src: &str) -> Result<midly::Smf<'static>, parser::Error> {
+fn parse(src: &str, musescore_compat: bool) -> Result<midly::Smf<'static>, parser::Error> {
     let mut stream = parser::XmlStream::new("ODDTAXI.musicxml", src);
 
     let v: musicxml::ScorePartwise = stream.required(b"score-partwise")?;
@@ -48,7 +48,7 @@ fn parse(src: &str) -> Result<midly::Smf<'static>, parser::Error> {
 
     println!("===========");
 
-    let timeline = timeline(&v);
+    let timeline = timeline(&v, musescore_compat);
     let part_name = v
         .part_list
         .score_part
@@ -98,7 +98,7 @@ struct TimelineTempo {
     bpm: f64,
 }
 
-fn timeline(v: &musicxml::ScorePartwise) -> Vec<TimelineItem> {
+fn timeline(v: &musicxml::ScorePartwise, musescore_compat: bool) -> Vec<TimelineItem> {
     assert_eq!(v.part.len(), 1);
 
     let mut iter = v
@@ -231,11 +231,14 @@ fn timeline(v: &musicxml::ScorePartwise) -> Vec<TimelineItem> {
                 if let Some(sound) = direction.sound.as_ref()
                     && let Some(tempo) = sound.tempo.as_ref()
                 {
-                    // A sound's own offset always applies, a direction's only with sound="yes"
                     let offset = sound
                         .offset
                         .as_ref()
-                        .or(direction.offset.as_ref().filter(|offset| offset.sound))
+                        .or(direction
+                            .offset
+                            .as_ref()
+                            // Why does MuseScore ignore this? Spec seems to suggest I should filter here
+                            .filter(|offset| offset.sound || musescore_compat))
                         .map(|offset| offset.value / divisions)
                         .unwrap_or(0.0);
 
@@ -296,11 +299,9 @@ fn to_smf(timeline: &[TimelineItem], part_name: Option<&str>) -> midly::Smf<'sta
                         });
                 }
             }
-            TimelineItem::Tempo(TimelineTempo { at, bpm }) => {
-                let tempo = bpm.round() as u64;
-
-                let microseconds_per_quarter_note = MINUTE.as_micros() as u64 / tempo;
-                let microseconds_per_quarter_note = microseconds_per_quarter_note as u32;
+            TimelineItem::Tempo(TimelineTempo { at, bpm }) if *bpm > 0.0 => {
+                let microseconds_per_quarter_note =
+                    (MINUTE.as_micros() as f64 / bpm).round() as u32;
 
                 tracks[0]
                     .entry(to_ticks(*at))
@@ -309,6 +310,7 @@ fn to_smf(timeline: &[TimelineItem], part_name: Option<&str>) -> midly::Smf<'sta
                         microseconds_per_quarter_note.into(),
                     )));
             }
+            TimelineItem::Tempo(_) => {}
             TimelineItem::TimeSignature(time) => {
                 let denominator = match time.denominator {
                     1 => 0,
@@ -722,7 +724,7 @@ mod tests {
         );
 
         let src = simple_xml_format(src);
-        let midi = parse(&src).unwrap();
+        let midi = parse(&src, false).unwrap();
         insta::assert_debug_snapshot!(midi);
     }
 
@@ -852,7 +854,7 @@ mod tests {
         </score-partwise>
         );
 
-        let midi = parse(src).unwrap();
+        let midi = parse(src, false).unwrap();
         insta::assert_debug_snapshot!(midi);
     }
 
@@ -867,7 +869,7 @@ mod tests {
         assert_eq!(v.part.len(), 1);
         assert_eq!(v.part_list.score_part.len(), 1);
 
-        let midi = parse(&src).unwrap();
+        let midi = parse(&src, false).unwrap();
         insta::assert_debug_snapshot!(midi);
     }
 
@@ -927,7 +929,7 @@ mod tests {
         );
 
         let src = simple_xml_format(src);
-        let midi = parse(&src).unwrap();
+        let midi = parse(&src, false).unwrap();
         insta::assert_debug_snapshot!(midi);
     }
 
@@ -983,8 +985,11 @@ mod tests {
         );
 
         let src = simple_xml_format(src);
-        let midi = parse(&src).unwrap();
-        insta::assert_debug_snapshot!(midi);
+        insta::assert_debug_snapshot!(parse(&src, false).unwrap());
+        insta::assert_debug_snapshot!(
+            "direction_offset_musescore_compat",
+            parse(&src, true).unwrap()
+        );
     }
 
     #[test]
@@ -1027,7 +1032,7 @@ mod tests {
         );
 
         let src = simple_xml_format(src);
-        let midi = parse(&src).unwrap();
+        let midi = parse(&src, false).unwrap();
         insta::assert_debug_snapshot!(midi);
     }
 
