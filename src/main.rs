@@ -48,6 +48,34 @@ fn parse(src: &str) -> Result<midly::Smf<'static>, parser::Error> {
 
     println!("===========");
 
+    let timeline = timeline(&v);
+    Ok(to_smf(&timeline))
+}
+
+#[derive(Debug)]
+enum TimelineItem {
+    Note(TimelineNote),
+    Tempo(TimelineTempo),
+}
+
+#[derive(Debug)]
+struct TimelineNote {
+    start: f64,
+    duration: f64,
+    key: u8,
+    velocity: u8,
+    off_velocity: u8,
+    tie_start: bool,
+    tie_stop: bool,
+}
+
+#[derive(Debug)]
+struct TimelineTempo {
+    at: f64,
+    bpm: f64,
+}
+
+fn timeline(v: &musicxml::ScorePartwise) -> Vec<TimelineItem> {
     assert_eq!(v.part.len(), 1);
 
     let mut iter = v
@@ -59,7 +87,7 @@ fn parse(src: &str) -> Result<midly::Smf<'static>, parser::Error> {
     let mut divisions = 1.0;
     let mut position = 0.0f64;
 
-    let mut events: BTreeMap<usize, Vec<midly::TrackEvent>> = BTreeMap::new();
+    let mut timeline = Vec::new();
 
     while let Some(item) = iter.next() {
         println!("{item:#?}");
@@ -87,31 +115,17 @@ fn parse(src: &str) -> Result<midly::Smf<'static>, parser::Error> {
                 let quarters = msg.duration / divisions;
 
                 if let musicxml::NoteKindStatePitchKind::Pitch(pitch) = &msg.kind {
-                    let pitch =
-                        midi_note_number(pitch.step, pitch.octave, pitch.alter.unwrap_or(0.0));
-
                     let (tie_start, tie_stop) = tie_kinds(&msg.tie);
-                    let vel = note_on_velocity(note);
-                    let off_vel = note_off_velocity(note);
+                    timeline.push(TimelineItem::Note(TimelineNote {
+                        start: position,
+                        duration: quarters,
+                        key: midi_note_number(pitch.step, pitch.octave, pitch.alter.unwrap_or(0.0)),
+                        velocity: note_on_velocity(note),
+                        off_velocity: note_off_velocity(note),
+                        tie_start,
+                        tie_stop,
+                    }));
 
-                    // Tied-into note continues the previous one, don't retrigger it
-                    if !tie_stop {
-                        events
-                            .entry(to_ticks(position))
-                            .or_default()
-                            .push(midly::TrackEvent {
-                                delta: 0.into(),
-                                kind: midly::TrackEventKind::Midi {
-                                    channel: 0.into(),
-                                    message: midly::MidiMessage::NoteOn {
-                                        key: pitch.into(),
-                                        vel: vel.into(),
-                                    },
-                                },
-                            });
-                    }
-
-                    let mut off = vec![];
                     let mut peek_iter = iter.clone();
                     while let Some(MeasureItem::Note(note)) = peek_iter.next() {
                         let musicxml::NoteKindState::Regular(next) = &note.kind else {
@@ -126,67 +140,24 @@ fn parse(src: &str) -> Result<midly::Smf<'static>, parser::Error> {
 
                         iter.next();
 
-                        let pitch =
-                            midi_note_number(pitch.step, pitch.octave, pitch.alter.unwrap_or(0.0));
-
+                        // Chord notes share the duration of the chord's first note
                         let (tie_start, tie_stop) = tie_kinds(&next.tie);
-                        let vel = note_on_velocity(note);
-
-                        if !tie_start {
-                            off.push((pitch, note_off_velocity(note)));
-                        }
-
-                        if !tie_stop {
-                            events
-                                .entry(to_ticks(position))
-                                .or_default()
-                                .push(midly::TrackEvent {
-                                    delta: 0.into(),
-                                    kind: midly::TrackEventKind::Midi {
-                                        channel: 0.into(),
-                                        message: midly::MidiMessage::NoteOn {
-                                            key: pitch.into(),
-                                            vel: vel.into(),
-                                        },
-                                    },
-                                });
-                        }
+                        timeline.push(TimelineItem::Note(TimelineNote {
+                            start: position,
+                            duration: quarters,
+                            key: midi_note_number(
+                                pitch.step,
+                                pitch.octave,
+                                pitch.alter.unwrap_or(0.0),
+                            ),
+                            velocity: note_on_velocity(note),
+                            off_velocity: note_off_velocity(note),
+                            tie_start,
+                            tie_stop,
+                        }));
                     }
 
                     position += quarters;
-
-                    // Note keeps sounding into the next tied note, which will release it
-                    if !tie_start {
-                        events
-                            .entry(to_ticks(position))
-                            .or_default()
-                            .push(midly::TrackEvent {
-                                delta: 0.into(),
-                                kind: midly::TrackEventKind::Midi {
-                                    channel: 0.into(),
-                                    message: midly::MidiMessage::NoteOff {
-                                        key: pitch.into(),
-                                        vel: off_vel.into(),
-                                    },
-                                },
-                            });
-                    }
-
-                    for (pitch, vel) in off {
-                        events
-                            .entry(to_ticks(position))
-                            .or_default()
-                            .push(midly::TrackEvent {
-                                delta: 0.into(),
-                                kind: midly::TrackEventKind::Midi {
-                                    channel: 0.into(),
-                                    message: midly::MidiMessage::NoteOff {
-                                        key: pitch.into(),
-                                        vel: vel.into(),
-                                    },
-                                },
-                            });
-                    }
                 } else if matches!(msg.kind, musicxml::NoteKindStatePitchKind::Rest(_)) {
                     position += quarters;
                 }
@@ -204,11 +175,6 @@ fn parse(src: &str) -> Result<midly::Smf<'static>, parser::Error> {
                 if let Some(sound) = direction.sound.as_ref()
                     && let Some(tempo) = sound.tempo.as_ref()
                 {
-                    let tempo = tempo.round() as u64;
-
-                    let microseconds_per_quarter_note = MINUTE.as_micros() as u64 / tempo;
-                    let microseconds_per_quarter_note = microseconds_per_quarter_note as u32;
-
                     // A sound's own offset always applies, a direction's only with sound="yes"
                     let offset = sound
                         .offset
@@ -216,18 +182,62 @@ fn parse(src: &str) -> Result<midly::Smf<'static>, parser::Error> {
                         .or(direction.offset.as_ref().filter(|offset| offset.sound))
                         .map(|offset| offset.value / divisions)
                         .unwrap_or(0.0);
-                    let position = (position + offset).max(0.0);
 
+                    timeline.push(TimelineItem::Tempo(TimelineTempo {
+                        at: (position + offset).max(0.0),
+                        bpm: *tempo,
+                    }));
+                }
+            }
+        }
+    }
+
+    timeline
+}
+
+fn to_smf(timeline: &[TimelineItem]) -> midly::Smf<'static> {
+    let mut events: BTreeMap<usize, Vec<midly::TrackEventKind>> = BTreeMap::new();
+
+    for item in timeline {
+        match item {
+            TimelineItem::Note(note) => {
+                if !note.tie_stop {
+                    events.entry(to_ticks(note.start)).or_default().push(
+                        midly::TrackEventKind::Midi {
+                            channel: 0.into(),
+                            message: midly::MidiMessage::NoteOn {
+                                key: note.key.into(),
+                                vel: note.velocity.into(),
+                            },
+                        },
+                    );
+                }
+
+                if !note.tie_start {
                     events
-                        .entry(to_ticks(position))
+                        .entry(to_ticks(note.start + note.duration))
                         .or_default()
-                        .push(midly::TrackEvent {
-                            delta: 0.into(),
-                            kind: midly::TrackEventKind::Meta(midly::MetaMessage::Tempo(
-                                microseconds_per_quarter_note.into(),
-                            )),
+                        .push(midly::TrackEventKind::Midi {
+                            channel: 0.into(),
+                            message: midly::MidiMessage::NoteOff {
+                                key: note.key.into(),
+                                vel: note.off_velocity.into(),
+                            },
                         });
                 }
+            }
+            TimelineItem::Tempo(TimelineTempo { at, bpm }) => {
+                let tempo = bpm.round() as u64;
+
+                let microseconds_per_quarter_note = MINUTE.as_micros() as u64 / tempo;
+                let microseconds_per_quarter_note = microseconds_per_quarter_note as u32;
+
+                events
+                    .entry(to_ticks(*at))
+                    .or_default()
+                    .push(midly::TrackEventKind::Meta(midly::MetaMessage::Tempo(
+                        microseconds_per_quarter_note.into(),
+                    )));
             }
         }
     }
@@ -239,20 +249,22 @@ fn parse(src: &str) -> Result<midly::Smf<'static>, parser::Error> {
         let mut delta = position - prev;
         prev = position;
 
-        for mut event in events {
-            event.delta = (delta as u32).into();
-            track.push(event);
+        for kind in events {
+            track.push(midly::TrackEvent {
+                delta: (delta as u32).into(),
+                kind,
+            });
             delta = 0;
         }
     }
 
-    Ok(midly::Smf {
+    midly::Smf {
         header: midly::Header {
             format: midly::Format::SingleTrack,
             timing: midly::Timing::Metrical(midly::num::u15::new(TICKS_PER_QUARTER_NOTE)),
         },
         tracks: vec![track],
-    })
+    }
 }
 
 fn to_ticks(quarters: f64) -> usize {
