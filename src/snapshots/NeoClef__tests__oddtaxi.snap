@@ -1,6 +1,6 @@
 ---
 source: src/main.rs
-assertion_line: 721
+assertion_line: 737
 expression: midi
 ---
 Smf {
@@ -14,6 +14,35 @@ Smf {
     },
     tracks: [
         [
+            TrackEvent {
+                delta: u28(
+                    0,
+                ),
+                kind: Meta(
+                    TrackName(
+                        [
+                            80,
+                            105,
+                            97,
+                            110,
+                            111,
+                            44,
+                            32,
+                            71,
+                            114,
+                            97,
+                            110,
+                            100,
+                            32,
+                            80,
+                            105,
+                            97,
+                            110,
+                            111,
+                        ],
+                    ),
+                ),
+            },
             TrackEvent {
                 delta: u28(
                     0,
@@ -36360,6 +36389,35 @@ Smf {
             },
         ],
         [
+            TrackEvent {
+                delta: u28(
+                    0,
+                ),
+                kind: Meta(
+                    TrackName(
+                        [
+                            80,
+                            105,
+                            97,
+                            110,
+                            111,
+                            44,
+                            32,
+                            71,
+                            114,
+                            97,
+                            110,
+                            100,
+                            32,
+                            80,
+                            105,
+                            97,
+                            110,
+                            111,
+                        ],
+                    ),
+                ),
+            },
             TrackEvent {
                 delta: u28(
                     1920,

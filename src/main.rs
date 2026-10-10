@@ -49,7 +49,12 @@ fn parse(src: &str) -> Result<midly::Smf<'static>, parser::Error> {
     println!("===========");
 
     let timeline = timeline(&v);
-    Ok(to_smf(&timeline))
+    let part_name = v
+        .part_list
+        .score_part
+        .first()
+        .map(|part| part.part_name.as_str());
+    Ok(to_smf(&timeline, part_name))
 }
 
 #[derive(Debug)]
@@ -208,7 +213,7 @@ fn timeline(v: &musicxml::ScorePartwise) -> Vec<TimelineItem> {
 
 type TrackEvents = BTreeMap<usize, Vec<midly::TrackEventKind<'static>>>;
 
-fn to_smf(timeline: &[TimelineItem]) -> midly::Smf<'static> {
+fn to_smf(timeline: &[TimelineItem], part_name: Option<&str>) -> midly::Smf<'static> {
     let mut tracks: Vec<TrackEvents> = vec![TrackEvents::new()];
 
     for item in timeline {
@@ -258,6 +263,17 @@ fn to_smf(timeline: &[TimelineItem]) -> midly::Smf<'static> {
                         microseconds_per_quarter_note.into(),
                     )));
             }
+        }
+    }
+
+    if let Some(part_name) = part_name {
+        // TODO: Fix the leak
+        let part_name: &'static [u8] = Box::leak(part_name.as_bytes().into());
+        for track in &mut tracks {
+            track.entry(0).or_default().insert(
+                0,
+                midly::TrackEventKind::Meta(midly::MetaMessage::TrackName(part_name)),
+            );
         }
     }
 
