@@ -287,6 +287,11 @@ fn delta_encode(events: TrackEvents) -> Vec<midly::TrackEvent<'static>> {
         }
     }
 
+    track.push(midly::TrackEvent {
+        delta: 1.into(),
+        kind: midly::TrackEventKind::Meta(midly::MetaMessage::EndOfTrack),
+    });
+
     track
 }
 

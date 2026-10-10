@@ -1,6 +1,6 @@
 ---
 source: src/main.rs
-assertion_line: 834
+assertion_line: 837
 expression: midi
 ---
 Smf {
@@ -193,6 +193,14 @@ Smf {
                         ),
                     },
                 },
+            },
+            TrackEvent {
+                delta: u28(
+                    1,
+                ),
+                kind: Meta(
+                    EndOfTrack,
+                ),
             },
         ],
     ],
