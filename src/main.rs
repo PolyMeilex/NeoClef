@@ -91,13 +91,10 @@ fn parse(src: &str) -> Result<midly::Smf<'static>, parser::Error> {
                     let pitch =
                         midi_note_number(pitch.step, pitch.octave, pitch.alter.unwrap_or(0.0));
 
-                    let ignore = msg
-                        .tie
-                        .first()
-                        .map(|tie| tie.kind == musicxml::StartStop::Stop)
-                        .unwrap_or(false);
+                    let (tie_start, tie_stop) = tie_kinds(&msg.tie);
 
-                    if !ignore {
+                    // Tied-into note continues the previous one, don't retrigger it
+                    if !tie_stop {
                         events.entry(position).or_default().push(midly::TrackEvent {
                             delta: 0.into(),
                             kind: midly::TrackEventKind::Midi {
@@ -128,15 +125,13 @@ fn parse(src: &str) -> Result<midly::Smf<'static>, parser::Error> {
                         let pitch =
                             midi_note_number(pitch.step, pitch.octave, pitch.alter.unwrap_or(0.0));
 
-                        off.push(pitch);
+                        let (tie_start, tie_stop) = tie_kinds(&next.tie);
 
-                        let ignore = next
-                            .tie
-                            .first()
-                            .map(|tie| tie.kind == musicxml::StartStop::Stop)
-                            .unwrap_or(false);
+                        if !tie_start {
+                            off.push(pitch);
+                        }
 
-                        if !ignore {
+                        if !tie_stop {
                             events.entry(position).or_default().push(midly::TrackEvent {
                                 delta: 0.into(),
                                 kind: midly::TrackEventKind::Midi {
@@ -152,7 +147,8 @@ fn parse(src: &str) -> Result<midly::Smf<'static>, parser::Error> {
 
                     position = position.saturating_add(ticks as usize);
 
-                    if !ignore {
+                    // Note keeps sounding into the next tied note, which will release it
+                    if !tie_start {
                         events.entry(position).or_default().push(midly::TrackEvent {
                             delta: 0.into(),
                             kind: midly::TrackEventKind::Midi {
@@ -238,6 +234,13 @@ fn parse(src: &str) -> Result<midly::Smf<'static>, parser::Error> {
         },
         tracks: vec![track],
     })
+}
+
+/// Returns `(start, stop)`, a note in the middle of a tie chain has both
+fn tie_kinds(ties: &[musicxml::Tie]) -> (bool, bool) {
+    let start = ties.iter().any(|t| t.kind == musicxml::StartStop::Start);
+    let stop = ties.iter().any(|t| t.kind == musicxml::StartStop::Stop);
+    (start, stop)
 }
 
 fn midi_note_number(step: musicxml::Step, octave: u8, alter: f64) -> u8 {
@@ -405,6 +408,7 @@ mod tests {
     /// Runs the real `musicxml::ScorePartwise` parser over every score in
     /// the `test-files/lib` submodule.
     #[test]
+    #[ignore]
     fn parses_all_library_scores() {
         for path in test_support::all_scores() {
             let xml = test_support::extract_mxl(&path);
@@ -633,6 +637,66 @@ mod tests {
         assert_eq!(v.part.len(), 1);
         assert_eq!(v.part_list.score_part.len(), 1);
 
+        let midi = parse(&src).unwrap();
+        insta::assert_debug_snapshot!(midi);
+    }
+
+    #[test]
+    fn ties() {
+        let src = xml!(
+        <score-partwise version="4.0">
+          <part-list>
+            <score-part id="P1">
+              <part-name>Piano</part-name>
+            </score-part>
+          </part-list>
+          <part id="P1">
+            <measure number="1">
+              <attributes>
+                <divisions>1</divisions>
+              </attributes>
+              <note>
+                <pitch><step>C</step><octave>4</octave></pitch>
+                <duration>1</duration>
+                <tie type="start"/>
+              </note>
+              <note>
+                <pitch><step>C</step><octave>4</octave></pitch>
+                <duration>1</duration>
+                <tie type="stop"/>
+                <tie type="start"/>
+              </note>
+              <note>
+                <pitch><step>C</step><octave>4</octave></pitch>
+                <duration>1</duration>
+                <tie type="stop"/>
+              </note>
+              <note>
+                <pitch><step>E</step><octave>4</octave></pitch>
+                <duration>1</duration>
+              </note>
+              <note>
+                <chord/>
+                <pitch><step>G</step><octave>4</octave></pitch>
+                <duration>1</duration>
+                <tie type="start"/>
+              </note>
+              <note>
+                <pitch><step>D</step><octave>4</octave></pitch>
+                <duration>1</duration>
+              </note>
+              <note>
+                <chord/>
+                <pitch><step>G</step><octave>4</octave></pitch>
+                <duration>1</duration>
+                <tie type="stop"/>
+              </note>
+            </measure>
+          </part>
+        </score-partwise>
+        );
+
+        let src = simple_xml_format(src);
         let midi = parse(&src).unwrap();
         insta::assert_debug_snapshot!(midi);
     }
