@@ -1,5 +1,6 @@
 #![allow(clippy::single_match, clippy::let_unit_value)]
 
+mod chord_symbol;
 mod musicxml;
 
 use std::{borrow::Cow, collections::BTreeMap, time::Duration};
@@ -18,6 +19,9 @@ const TICKS_PER_QUARTER_NOTE_F64: f64 = TICKS_PER_QUARTER_NOTE as f64;
 const MINUTE: Duration = Duration::from_secs(60);
 
 const DEFAULT_BPM: u32 = 120;
+
+const DEFAULT_VELOCITY: u8 = 80;
+const HARMONY_CHANNEL: u8 = 1;
 
 // 1s = 1_000_000µ
 // 1m = 60_000_000µ
@@ -77,6 +81,7 @@ struct TimelineNote {
     tie_start: bool,
     tie_stop: bool,
     staff: u8,
+    channel: u8,
 }
 
 #[derive(Debug)]
@@ -111,8 +116,11 @@ fn timeline(v: &musicxml::ScorePartwise, musescore_compat: bool) -> Vec<Timeline
 
     let mut divisions = 1.0;
     let mut position = 0.0f64;
+    let mut end = 0.0f64;
+    let mut staves = 1;
 
     let mut timeline = Vec::new();
+    let mut chord_symbols = Vec::new();
 
     while let Some(item) = iter.next() {
         log::trace!("{item:#?}");
@@ -121,6 +129,9 @@ fn timeline(v: &musicxml::ScorePartwise, musescore_compat: bool) -> Vec<Timeline
             MeasureItem::Attributes(attributes) => {
                 if let Some(d) = attributes.divisions.as_ref() {
                     divisions = *d;
+                }
+                if let Some(s) = attributes.staves {
+                    staves = s;
                 }
 
                 for time in &attributes.time {
@@ -178,6 +189,7 @@ fn timeline(v: &musicxml::ScorePartwise, musescore_compat: bool) -> Vec<Timeline
                             tie_start,
                             tie_stop,
                             staff: note.staff.unwrap_or(1),
+                            channel: 0,
                         }));
 
                         let mut peek_iter = iter.clone();
@@ -209,6 +221,7 @@ fn timeline(v: &musicxml::ScorePartwise, musescore_compat: bool) -> Vec<Timeline
                                 tie_start,
                                 tie_stop,
                                 staff: note.staff.unwrap_or(1),
+                                channel: 0,
                             }));
                         }
 
@@ -228,7 +241,24 @@ fn timeline(v: &musicxml::ScorePartwise, musescore_compat: bool) -> Vec<Timeline
             }
             MeasureItem::Print(_) => {}
             MeasureItem::Barline(_) => {}
-            MeasureItem::Harmony(_) => {}
+            MeasureItem::Harmony(harmony) => {
+                if let Some(keys) = chord_symbol::realize(harmony) {
+                    let offset = harmony
+                        .offset
+                        .as_ref()
+                        // MuseScore ignores `sound`, like for directions
+                        .filter(|offset| offset.sound || musescore_compat)
+                        .map(|offset| offset.value / divisions)
+                        .unwrap_or(0.0);
+
+                    let staff = harmony
+                        .staff
+                        .filter(|staff| (1..=staves).contains(&u32::from(*staff)))
+                        .unwrap_or(1);
+
+                    chord_symbols.push((staff, (position + offset).max(0.0), keys));
+                }
+            }
             MeasureItem::Direction(direction) => {
                 if let Some(sound) = direction.sound.as_ref()
                     && let Some(tempo) = sound.tempo.as_ref()
@@ -250,6 +280,40 @@ fn timeline(v: &musicxml::ScorePartwise, musescore_compat: bool) -> Vec<Timeline
                     }));
                 }
             }
+        }
+    }
+
+    for item in &timeline {
+        if let TimelineItem::Note(note) = item {
+            end = end.max(note.start + note.duration);
+        }
+    }
+    end = end.max(position);
+
+    // Like MuseScore, chord symbols last until the next one on the same staff, or the end
+    chord_symbols.sort_by(|(staff_a, start_a, _), (staff_b, start_b, _)| {
+        staff_a.cmp(staff_b).then(start_a.total_cmp(start_b))
+    });
+    for (i, (staff, start, keys)) in chord_symbols.iter().enumerate() {
+        let next = chord_symbols[i + 1..]
+            .iter()
+            .take_while(|(next_staff, _, _)| next_staff == staff)
+            .map(|(_, next_start, _)| *next_start)
+            .find(|next_start| next_start > start)
+            .unwrap_or(end);
+
+        for key in keys {
+            timeline.push(TimelineItem::Note(TimelineNote {
+                start: *start,
+                duration: (next - start).max(0.0),
+                key: *key,
+                velocity: DEFAULT_VELOCITY,
+                off_velocity: 0,
+                tie_start: false,
+                tie_stop: false,
+                staff: *staff,
+                channel: HARMONY_CHANNEL,
+            }));
         }
     }
 
@@ -279,7 +343,7 @@ fn to_smf(timeline: &[TimelineItem], part_name: Option<&str>) -> midly::Smf<'sta
                 if !note.tie_stop {
                     events.entry(to_ticks(note.start)).or_default().push(
                         midly::TrackEventKind::Midi {
-                            channel: 0.into(),
+                            channel: note.channel.into(),
                             message: midly::MidiMessage::NoteOn {
                                 key: note.key.into(),
                                 vel: note.velocity.into(),
@@ -293,7 +357,7 @@ fn to_smf(timeline: &[TimelineItem], part_name: Option<&str>) -> midly::Smf<'sta
                         .entry(to_ticks(note.start + note.duration))
                         .or_default()
                         .push(midly::TrackEventKind::Midi {
-                            channel: 0.into(),
+                            channel: note.channel.into(),
                             message: midly::MidiMessage::NoteOff {
                                 key: note.key.into(),
                                 vel: note.off_velocity.into(),
@@ -469,7 +533,7 @@ fn dynamics_to_velocity(dynamics: f64) -> u8 {
 fn note_on_velocity(note: &musicxml::Note) -> u8 {
     note.dynamics
         .map(|dynamics| dynamics_to_velocity(dynamics).max(1))
-        .unwrap_or(80)
+        .unwrap_or(DEFAULT_VELOCITY)
 }
 
 fn note_off_velocity(note: &musicxml::Note) -> u8 {
@@ -1027,6 +1091,71 @@ mod tests {
             "direction_offset_musescore_compat",
             parse(&src, true).unwrap()
         );
+    }
+
+    #[test]
+    fn harmony() {
+        let src = xml!(
+        <score-partwise version="4.0">
+          <part-list>
+            <score-part id="P1">
+              <part-name>Guitar</part-name>
+            </score-part>
+          </part-list>
+          <part id="P1">
+            <measure number="1">
+              <attributes>
+                <divisions>2</divisions>
+              </attributes>
+              <harmony>
+                <root><root-step>G</root-step></root>
+                <kind>dominant</kind>
+                <bass><bass-step>B</bass-step></bass>
+              </harmony>
+              <note>
+                <pitch><step>B</step><octave>4</octave></pitch>
+                <duration>4</duration>
+              </note>
+              <harmony>
+                <root><root-step>C</root-step><root-alter>1</root-alter></root>
+                <kind>minor-seventh</kind>
+                <degree>
+                  <degree-value>5</degree-value>
+                  <degree-alter>-1</degree-alter>
+                  <degree-type>alter</degree-type>
+                </degree>
+                <offset>2</offset>
+              </harmony>
+              <note>
+                <pitch><step>C</step><octave>5</octave></pitch>
+                <duration>4</duration>
+              </note>
+            </measure>
+            <measure number="2">
+              <harmony>
+                <root><root-step>F</root-step></root>
+                <kind>none</kind>
+              </harmony>
+              <note>
+                <pitch><step>A</step><octave>4</octave></pitch>
+                <duration>4</duration>
+              </note>
+              <harmony>
+                <root><root-step>F</root-step></root>
+                <kind>other</kind>
+              </harmony>
+              <note>
+                <pitch><step>F</step><octave>4</octave></pitch>
+                <duration>4</duration>
+              </note>
+            </measure>
+          </part>
+        </score-partwise>
+        );
+
+        let src = simple_xml_format(src);
+        insta::assert_debug_snapshot!(parse(&src, false).unwrap());
+        insta::assert_debug_snapshot!("harmony_musescore_compat", parse(&src, true).unwrap());
     }
 
     #[test]

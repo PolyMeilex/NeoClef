@@ -894,6 +894,7 @@ pub struct Attributes {
     pub divisions: Option<PositiveDivisions>,
     pub key: Vec<Key>,
     pub time: Vec<Time>,
+    pub staves: Option<u32>,
     pub clef: Vec<Clef>,
     pub measure_style: Vec<MeasureStyle>,
 }
@@ -909,7 +910,7 @@ impl<'a> ParseContent<'a> for Attributes {
         let divisions = stream.optional(b"divisions")?;
         let key = stream.zero_or_more(b"key")?;
         let time = stream.zero_or_more(b"time")?;
-        let _staves = stream.optional::<()>(b"staves")?;
+        let staves = stream.optional(b"staves")?;
         let _part_symbol = stream.optional::<()>(b"part-symbol")?;
         let _instruments = stream.optional::<()>(b"instruments")?;
         let clef = stream.zero_or_more(b"clef")?;
@@ -921,6 +922,7 @@ impl<'a> ParseContent<'a> for Attributes {
             divisions,
             key,
             time,
+            staves,
             clef,
             measure_style,
         })
@@ -1276,7 +1278,7 @@ impl<'a> ParseContent<'a> for Forward {
 /// https://w3c.github.io/musicxml/musicxml-reference/elements/root/
 #[derive(Debug, Clone)]
 pub struct Root {
-    pub step: Step,
+    pub step: RootStep,
     pub alter: Option<Semitones>,
 }
 
@@ -1292,6 +1294,34 @@ impl<'a> ParseContent<'a> for Root {
         stream.skip_to_end(tag)?;
 
         Ok(Self { step, alter })
+    }
+}
+
+/// https://w3c.github.io/musicxml/musicxml-reference/elements/root-step/
+#[derive(Debug, Clone)]
+pub struct RootStep {
+    pub step: Step,
+    /// How the root should appear in the score instead of the step
+    pub text: Option<String>,
+}
+
+impl<'a> ParseContent<'a> for RootStep {
+    fn parse(
+        stream: &mut XmlStream<'a>,
+        tag: &[u8],
+        start: &BytesStart<'a>,
+    ) -> Result<Self, parser::Error> {
+        let mut text = None;
+        for attr in start.attributes().filter_map(|r| r.ok()) {
+            match attr.key.as_ref() {
+                b"text" => text = Some(String::from_utf8_lossy(&attr.value).into_owned()),
+                _ => {}
+            }
+        }
+
+        let step = Step::parse(stream, tag, start)?;
+
+        Ok(Self { step, text })
     }
 }
 
@@ -1330,8 +1360,130 @@ pub enum HarmonyChordRoot {
 #[derive(Debug, Clone)]
 pub struct HarmonyChord {
     pub root: HarmonyChordRoot,
-    pub kind: HarmonyKind,
+    pub kind: Kind,
     pub bass: Option<Bass>,
+    pub degrees: Vec<Degree>,
+}
+
+/// https://w3c.github.io/musicxml/musicxml-reference/elements/degree/
+#[derive(Debug, Clone)]
+pub struct Degree {
+    pub value: u32,
+    pub alter: Semitones,
+    pub kind: DegreeType,
+    pub print_object: Option<bool>,
+}
+
+impl<'a> ParseContent<'a> for Degree {
+    fn parse(
+        stream: &mut XmlStream<'a>,
+        tag: &[u8],
+        start: &BytesStart<'a>,
+    ) -> Result<Self, parser::Error> {
+        let mut print_object = None;
+        for attr in start.attributes().filter_map(|r| r.ok()) {
+            match attr.key.as_ref() {
+                b"print-object" => print_object = Some(parse_yes_no(attr.value.as_ref())),
+                _ => {}
+            }
+        }
+
+        let value = stream.required(b"degree-value")?;
+        let alter = stream.required(b"degree-alter")?;
+        let kind = stream.required(b"degree-type")?;
+
+        stream.skip_to_end(tag)?;
+
+        Ok(Self {
+            value,
+            alter,
+            kind,
+            print_object,
+        })
+    }
+}
+
+/// https://w3c.github.io/musicxml/musicxml-reference/data-types/degree-type-value/
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DegreeType {
+    Add,
+    Alter,
+    Subtract,
+}
+
+impl FromStr for DegreeType {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s.trim() {
+            "add" => Ok(Self::Add),
+            "alter" => Ok(Self::Alter),
+            "subtract" => Ok(Self::Subtract),
+            other => Err(format!("unknown degree type: {other}")),
+        }
+    }
+}
+
+impl<'a> ParseContent<'a> for DegreeType {
+    fn parse(
+        stream: &mut XmlStream<'a>,
+        tag: &[u8],
+        start: &BytesStart<'a>,
+    ) -> Result<Self, parser::Error> {
+        let v = Cow::<str>::parse(stream, tag, start)?;
+        v.parse::<Self>()
+            .map_err(|e| stream.error(parser::ErrorKind::UnexpectedValue(e)))
+    }
+}
+
+/// https://w3c.github.io/musicxml/musicxml-reference/elements/kind/
+#[derive(Debug, Clone)]
+pub struct Kind {
+    pub value: HarmonyKind,
+    /// Spell the kind with symbols (triangle, `-`, `+`, `°`, `ø`) where possible
+    pub use_symbols: Option<bool>,
+    /// How the kind is spelled in the score, follows the symbol with `use_symbols`
+    pub text: Option<String>,
+    pub stack_degrees: Option<bool>,
+    pub parentheses_degrees: Option<bool>,
+    pub bracket_degrees: Option<bool>,
+}
+
+impl<'a> ParseContent<'a> for Kind {
+    fn parse(
+        stream: &mut XmlStream<'a>,
+        tag: &[u8],
+        start: &BytesStart<'a>,
+    ) -> Result<Self, parser::Error> {
+        let mut use_symbols = None;
+        let mut text = None;
+        let mut stack_degrees = None;
+        let mut parentheses_degrees = None;
+        let mut bracket_degrees = None;
+        for attr in start.attributes().filter_map(|r| r.ok()) {
+            match attr.key.as_ref() {
+                b"use-symbols" => use_symbols = Some(parse_yes_no(attr.value.as_ref())),
+                b"text" => text = Some(String::from_utf8_lossy(&attr.value).into_owned()),
+                b"stack-degrees" => stack_degrees = Some(parse_yes_no(attr.value.as_ref())),
+                b"parentheses-degrees" => {
+                    parentheses_degrees = Some(parse_yes_no(attr.value.as_ref()))
+                }
+                b"bracket-degrees" => bracket_degrees = Some(parse_yes_no(attr.value.as_ref())),
+                _ => {}
+            }
+        }
+
+        let value = HarmonyKind::parse(stream, tag, start)?;
+
+        Ok(Self {
+            value,
+            use_symbols,
+            text,
+            stack_degrees,
+            parentheses_degrees,
+            bracket_degrees,
+        })
+    }
 }
 
 /// https://w3c.github.io/musicxml/musicxml-reference/data-types/kind-value/
@@ -1457,9 +1609,14 @@ impl<'a> ParseContentFlat<'a> for HarmonyChord {
         let kind = stream.required(b"kind")?;
         let _inversion = stream.optional::<()>(b"inversion")?;
         let bass = stream.optional(b"bass")?;
-        let _degree = stream.zero_or_more::<()>(b"degree")?;
+        let degrees = stream.zero_or_more(b"degree")?;
 
-        Ok(Self { root, kind, bass })
+        Ok(Self {
+            root,
+            kind,
+            bass,
+            degrees,
+        })
     }
 }
 
@@ -1467,6 +1624,7 @@ impl<'a> ParseContentFlat<'a> for HarmonyChord {
 #[derive(Debug)]
 pub struct Harmony {
     pub chords: Vec<HarmonyChord>,
+    pub offset: Option<Offset>,
     pub staff: Option<u8>,
 }
 
@@ -1482,14 +1640,18 @@ impl<'a> ParseContent<'a> for Harmony {
         }
 
         let _frame = stream.optional::<()>(b"frame")?;
-        let _offset = stream.optional::<()>(b"offset")?;
+        let offset = stream.optional(b"offset")?;
         let _footnote = stream.optional::<()>(b"footnote")?;
         let _level = stream.optional::<()>(b"level")?;
         let staff = stream.optional(b"staff")?;
 
         stream.skip_to_end(tag)?;
 
-        Ok(Self { chords, staff })
+        Ok(Self {
+            chords,
+            offset,
+            staff,
+        })
     }
 }
 
