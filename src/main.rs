@@ -57,7 +57,7 @@ fn parse(src: &str) -> Result<midly::Smf<'static>, parser::Error> {
         .flat_map(|measure| &measure.content);
 
     let mut divisions = 1.0;
-    let mut position = 0usize;
+    let mut position = 0.0f64;
 
     let mut events: BTreeMap<usize, Vec<midly::TrackEvent>> = BTreeMap::new();
 
@@ -84,8 +84,7 @@ fn parse(src: &str) -> Result<midly::Smf<'static>, parser::Error> {
                 };
                 assert!(msg.chord.is_none());
 
-                let duration = msg.duration;
-                let ticks = ((duration / divisions) * TICKS_PER_QUARTER_NOTE_F64) as u32;
+                let quarters = msg.duration / divisions;
 
                 if let musicxml::NoteKindStatePitchKind::Pitch(pitch) = &msg.kind {
                     let pitch =
@@ -97,16 +96,19 @@ fn parse(src: &str) -> Result<midly::Smf<'static>, parser::Error> {
 
                     // Tied-into note continues the previous one, don't retrigger it
                     if !tie_stop {
-                        events.entry(position).or_default().push(midly::TrackEvent {
-                            delta: 0.into(),
-                            kind: midly::TrackEventKind::Midi {
-                                channel: 0.into(),
-                                message: midly::MidiMessage::NoteOn {
-                                    key: pitch.into(),
-                                    vel: vel.into(),
+                        events
+                            .entry(to_ticks(position))
+                            .or_default()
+                            .push(midly::TrackEvent {
+                                delta: 0.into(),
+                                kind: midly::TrackEventKind::Midi {
+                                    channel: 0.into(),
+                                    message: midly::MidiMessage::NoteOn {
+                                        key: pitch.into(),
+                                        vel: vel.into(),
+                                    },
                                 },
-                            },
-                        });
+                            });
                     }
 
                     let mut off = vec![];
@@ -135,63 +137,66 @@ fn parse(src: &str) -> Result<midly::Smf<'static>, parser::Error> {
                         }
 
                         if !tie_stop {
-                            events.entry(position).or_default().push(midly::TrackEvent {
+                            events
+                                .entry(to_ticks(position))
+                                .or_default()
+                                .push(midly::TrackEvent {
+                                    delta: 0.into(),
+                                    kind: midly::TrackEventKind::Midi {
+                                        channel: 0.into(),
+                                        message: midly::MidiMessage::NoteOn {
+                                            key: pitch.into(),
+                                            vel: vel.into(),
+                                        },
+                                    },
+                                });
+                        }
+                    }
+
+                    position += quarters;
+
+                    // Note keeps sounding into the next tied note, which will release it
+                    if !tie_start {
+                        events
+                            .entry(to_ticks(position))
+                            .or_default()
+                            .push(midly::TrackEvent {
                                 delta: 0.into(),
                                 kind: midly::TrackEventKind::Midi {
                                     channel: 0.into(),
-                                    message: midly::MidiMessage::NoteOn {
+                                    message: midly::MidiMessage::NoteOff {
+                                        key: pitch.into(),
+                                        vel: off_vel.into(),
+                                    },
+                                },
+                            });
+                    }
+
+                    for (pitch, vel) in off {
+                        events
+                            .entry(to_ticks(position))
+                            .or_default()
+                            .push(midly::TrackEvent {
+                                delta: 0.into(),
+                                kind: midly::TrackEventKind::Midi {
+                                    channel: 0.into(),
+                                    message: midly::MidiMessage::NoteOff {
                                         key: pitch.into(),
                                         vel: vel.into(),
                                     },
                                 },
                             });
-                        }
-                    }
-
-                    position = position.saturating_add(ticks as usize);
-
-                    // Note keeps sounding into the next tied note, which will release it
-                    if !tie_start {
-                        events.entry(position).or_default().push(midly::TrackEvent {
-                            delta: 0.into(),
-                            kind: midly::TrackEventKind::Midi {
-                                channel: 0.into(),
-                                message: midly::MidiMessage::NoteOff {
-                                    key: pitch.into(),
-                                    vel: off_vel.into(),
-                                },
-                            },
-                        });
-                    }
-
-                    for (pitch, vel) in off {
-                        events.entry(position).or_default().push(midly::TrackEvent {
-                            delta: 0.into(),
-                            kind: midly::TrackEventKind::Midi {
-                                channel: 0.into(),
-                                message: midly::MidiMessage::NoteOff {
-                                    key: pitch.into(),
-                                    vel: vel.into(),
-                                },
-                            },
-                        });
                     }
                 } else if matches!(msg.kind, musicxml::NoteKindStatePitchKind::Rest(_)) {
                     // TODO: is_measure
-                    position = position.saturating_add(ticks as usize);
+                    position += quarters;
                 }
             }
             MeasureItem::Backup(backup) => {
-                let duration: f64 = backup.duration;
-
-                let ticks = (duration / divisions) * TICKS_PER_QUARTER_NOTE_F64;
-                position = position.saturating_sub(ticks as usize)
+                position = (position - backup.duration / divisions).max(0.0);
             }
             MeasureItem::Forward(forward) => {
-                let duration: f64 = forward.duration;
-
-                let ticks = (duration / divisions) * TICKS_PER_QUARTER_NOTE_F64;
-                position = position.saturating_add(ticks as usize)
+                position += forward.duration / divisions;
             }
             MeasureItem::Print(_) => {}
             MeasureItem::Barline(_) => {}
@@ -210,16 +215,19 @@ fn parse(src: &str) -> Result<midly::Smf<'static>, parser::Error> {
                         .offset
                         .as_ref()
                         .or(direction.offset.as_ref().filter(|offset| offset.sound))
-                        .map(|offset| (offset.value / divisions) * TICKS_PER_QUARTER_NOTE_F64)
+                        .map(|offset| offset.value / divisions)
                         .unwrap_or(0.0);
-                    let position = (position as f64 + offset).max(0.0) as usize;
+                    let position = (position + offset).max(0.0);
 
-                    events.entry(position).or_default().push(midly::TrackEvent {
-                        delta: 0.into(),
-                        kind: midly::TrackEventKind::Meta(midly::MetaMessage::Tempo(
-                            microseconds_per_quarter_note.into(),
-                        )),
-                    });
+                    events
+                        .entry(to_ticks(position))
+                        .or_default()
+                        .push(midly::TrackEvent {
+                            delta: 0.into(),
+                            kind: midly::TrackEventKind::Meta(midly::MetaMessage::Tempo(
+                                microseconds_per_quarter_note.into(),
+                            )),
+                        });
                 }
             }
         }
@@ -246,6 +254,10 @@ fn parse(src: &str) -> Result<midly::Smf<'static>, parser::Error> {
         },
         tracks: vec![track],
     })
+}
+
+fn to_ticks(quarters: f64) -> usize {
+    (quarters * TICKS_PER_QUARTER_NOTE_F64).round() as usize
 }
 
 const MIDI_FORTE_VELOCITY: f64 = 90.0;
