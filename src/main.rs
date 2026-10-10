@@ -61,6 +61,8 @@ fn parse(src: &str) -> Result<midly::Smf<'static>, parser::Error> {
 enum TimelineItem {
     Note(TimelineNote),
     Tempo(TimelineTempo),
+    TimeSignature(TimelineTimeSignature),
+    KeySignature(TimelineKeySignature),
 }
 
 #[derive(Debug)]
@@ -73,6 +75,21 @@ struct TimelineNote {
     tie_start: bool,
     tie_stop: bool,
     staff: u8,
+}
+
+#[derive(Debug)]
+struct TimelineTimeSignature {
+    at: f64,
+    numerator: u8,
+    denominator: u8,
+}
+
+#[derive(Debug)]
+struct TimelineKeySignature {
+    at: f64,
+    fifths: i8,
+    /// Applies to all staves if absent
+    staff: Option<u8>,
 }
 
 #[derive(Debug)]
@@ -102,6 +119,29 @@ fn timeline(v: &musicxml::ScorePartwise) -> Vec<TimelineItem> {
             MeasureItem::Attributes(attributes) => {
                 if let Some(d) = attributes.divisions.as_ref() {
                     divisions = *d;
+                }
+
+                for time in &attributes.time {
+                    if let Some(1) | None = time.number
+                        && let musicxml::TimeKind::Signature { signatures, .. } = &time.kind
+                        && let Some((numerator, denominator)) = time_signature(signatures)
+                    {
+                        timeline.push(TimelineItem::TimeSignature(TimelineTimeSignature {
+                            at: position,
+                            numerator,
+                            denominator,
+                        }));
+                    }
+                }
+
+                for key in &attributes.key {
+                    if let musicxml::KeyKind::Traditional(traditional) = &key.kind {
+                        timeline.push(TimelineItem::KeySignature(TimelineKeySignature {
+                            at: position,
+                            fifths: traditional.fifths.clamp(-7, 7) as i8,
+                            staff: key.number,
+                        }));
+                    }
                 }
 
                 // assert_eq!(
@@ -214,16 +254,22 @@ fn timeline(v: &musicxml::ScorePartwise) -> Vec<TimelineItem> {
 type TrackEvents = BTreeMap<usize, Vec<midly::TrackEventKind<'static>>>;
 
 fn to_smf(timeline: &[TimelineItem], part_name: Option<&str>) -> midly::Smf<'static> {
-    let mut tracks: Vec<TrackEvents> = vec![TrackEvents::new()];
+    let staves = timeline
+        .iter()
+        .filter_map(|item| match item {
+            TimelineItem::Note(note) => Some(note.staff),
+            TimelineItem::KeySignature(key) => key.staff,
+            _ => None,
+        })
+        .max()
+        .unwrap_or(1)
+        .max(1);
+    let mut tracks: Vec<TrackEvents> = vec![TrackEvents::new(); usize::from(staves)];
 
     for item in timeline {
         match item {
             TimelineItem::Note(note) => {
-                let idx = usize::from(note.staff.max(1)) - 1;
-                if tracks.len() <= idx {
-                    tracks.resize_with(idx + 1, TrackEvents::new);
-                }
-                let events = &mut tracks[idx];
+                let events = &mut tracks[usize::from(note.staff.max(1)) - 1];
 
                 if !note.tie_stop {
                     events.entry(to_ticks(note.start)).or_default().push(
@@ -263,6 +309,68 @@ fn to_smf(timeline: &[TimelineItem], part_name: Option<&str>) -> midly::Smf<'sta
                         microseconds_per_quarter_note.into(),
                     )));
             }
+            TimelineItem::TimeSignature(time) => {
+                let denominator = match time.denominator {
+                    1 => 0,
+                    2 => 1,
+                    4 => 2,
+                    8 => 3,
+                    16 => 4,
+                    32 => 5,
+                    _ => 2,
+                };
+
+                tracks[0]
+                    .entry(to_ticks(time.at))
+                    .or_default()
+                    .push(midly::TrackEventKind::Meta(
+                        midly::MetaMessage::TimeSignature(time.numerator, denominator, 24, 8),
+                    ));
+            }
+            TimelineItem::KeySignature(key) => {
+                let range = match key.staff {
+                    Some(staff) => {
+                        let idx = usize::from(staff.max(1)) - 1;
+                        idx..idx + 1
+                    }
+                    None => 0..tracks.len(),
+                };
+
+                for events in &mut tracks[range] {
+                    events
+                        .entry(to_ticks(key.at))
+                        .or_default()
+                        .push(midly::TrackEventKind::Meta(
+                            midly::MetaMessage::KeySignature(key.fifths, false),
+                        ));
+                }
+            }
+        }
+    }
+
+    // Like MuseScore, fall back to C major when a track has no initial key signature
+    for events in &mut tracks {
+        let events = events.entry(0).or_default();
+        let has_key = events.iter().any(|event| {
+            matches!(
+                event,
+                midly::TrackEventKind::Meta(midly::MetaMessage::KeySignature(..))
+            )
+        });
+        if !has_key {
+            let after_time_signature = events
+                .iter()
+                .take_while(|event| {
+                    matches!(
+                        event,
+                        midly::TrackEventKind::Meta(midly::MetaMessage::TimeSignature(..))
+                    )
+                })
+                .count();
+            events.insert(
+                after_time_signature,
+                midly::TrackEventKind::Meta(midly::MetaMessage::KeySignature(0, false)),
+            );
         }
     }
 
@@ -329,6 +437,33 @@ fn note_on_velocity(note: &musicxml::Note) -> u8 {
 
 fn note_off_velocity(note: &musicxml::Note) -> u8 {
     note.end_dynamics.map(dynamics_to_velocity).unwrap_or(0)
+}
+
+/// Composite signatures (`3+2/8`, `2/4 + 3/8`) are summed into one
+fn time_signature(signatures: &[musicxml::TimeSignature]) -> Option<(u8, u8)> {
+    let parsed = signatures
+        .iter()
+        .map(|signature| {
+            let beats = signature
+                .beats
+                .split('+')
+                .map(|beats| beats.trim().parse::<u32>().ok())
+                .sum::<Option<u32>>()?;
+            let beat_type = signature.beat_type.trim().parse::<u32>().ok()?;
+            Some((beats, beat_type))
+        })
+        .collect::<Option<Vec<_>>>()?;
+
+    let denominator = parsed.iter().map(|(_, beat_type)| *beat_type).max()?;
+    let numerator = parsed
+        .iter()
+        .map(|(beats, beat_type)| beats * (denominator / beat_type))
+        .sum::<u32>();
+
+    Some((
+        u8::try_from(numerator).ok()?,
+        u8::try_from(denominator).ok()?,
+    ))
 }
 
 /// Returns `(start, stop)`, a note in the middle of a tie chain has both

@@ -1,6 +1,6 @@
 ---
 source: src/main.rs
-assertion_line: 737
+assertion_line: 872
 expression: midi
 ---
 Smf {
@@ -40,6 +40,30 @@ Smf {
                             110,
                             111,
                         ],
+                    ),
+                ),
+            },
+            TrackEvent {
+                delta: u28(
+                    0,
+                ),
+                kind: Meta(
+                    TimeSignature(
+                        4,
+                        2,
+                        24,
+                        8,
+                    ),
+                ),
+            },
+            TrackEvent {
+                delta: u28(
+                    0,
+                ),
+                kind: Meta(
+                    KeySignature(
+                        -1,
+                        false,
                     ),
                 ),
             },
@@ -21899,6 +21923,17 @@ Smf {
                 delta: u28(
                     0,
                 ),
+                kind: Meta(
+                    KeySignature(
+                        -4,
+                        false,
+                    ),
+                ),
+            },
+            TrackEvent {
+                delta: u28(
+                    0,
+                ),
                 kind: Midi {
                     channel: u4(
                         0,
@@ -29495,6 +29530,17 @@ Smf {
                 delta: u28(
                     0,
                 ),
+                kind: Meta(
+                    KeySignature(
+                        -1,
+                        false,
+                    ),
+                ),
+            },
+            TrackEvent {
+                delta: u28(
+                    0,
+                ),
                 kind: Midi {
                     channel: u4(
                         0,
@@ -36415,6 +36461,17 @@ Smf {
                             110,
                             111,
                         ],
+                    ),
+                ),
+            },
+            TrackEvent {
+                delta: u28(
+                    0,
+                ),
+                kind: Meta(
+                    KeySignature(
+                        -1,
+                        false,
                     ),
                 ),
             },
@@ -57194,6 +57251,17 @@ Smf {
                 delta: u28(
                     0,
                 ),
+                kind: Meta(
+                    KeySignature(
+                        -4,
+                        false,
+                    ),
+                ),
+            },
+            TrackEvent {
+                delta: u28(
+                    0,
+                ),
                 kind: Midi {
                     channel: u4(
                         0,
@@ -64317,6 +64385,17 @@ Smf {
                         ),
                     },
                 },
+            },
+            TrackEvent {
+                delta: u28(
+                    0,
+                ),
+                kind: Meta(
+                    KeySignature(
+                        -1,
+                        false,
+                    ),
+                ),
             },
             TrackEvent {
                 delta: u28(

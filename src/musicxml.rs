@@ -1667,6 +1667,8 @@ impl<'a> ParseContent<'a> for Offset {
 pub struct Key {
     pub kind: KeyKind,
     pub key_octave: Vec<()>,
+    /// Staff number, applies to all staves of the part if absent
+    pub number: Option<u8>,
 }
 
 /// https://w3c.github.io/musicxml/musicxml-reference/elements/key/
@@ -1708,8 +1710,16 @@ impl<'a> ParseContent<'a> for Key {
     fn parse(
         stream: &mut XmlStream<'a>,
         tag: &[u8],
-        _start: &BytesStart<'a>,
+        start: &BytesStart<'a>,
     ) -> Result<Self, parser::Error> {
+        let mut number = None;
+        for attr in start.attributes().filter_map(|r| r.ok()) {
+            match attr.key.as_ref() {
+                b"number" => number = parse_str_as(&attr.value),
+                _ => {}
+            }
+        }
+
         let kind = match stream.peek_tag()? {
             Some(b"key-step") => {
                 let mut items = Vec::new();
@@ -1734,7 +1744,11 @@ impl<'a> ParseContent<'a> for Key {
 
         stream.skip_to_end(tag)?;
 
-        Ok(Self { kind, key_octave })
+        Ok(Self {
+            kind,
+            key_octave,
+            number,
+        })
     }
 }
 
@@ -1742,6 +1756,7 @@ impl<'a> ParseContent<'a> for Key {
 #[derive(Debug, PartialEq)]
 pub struct Time {
     pub kind: TimeKind,
+    pub number: Option<u8>,
 }
 
 /// https://w3c.github.io/musicxml/musicxml-reference/elements/time/
@@ -1802,8 +1817,16 @@ impl<'a> ParseContent<'a> for Time {
     fn parse(
         stream: &mut XmlStream<'a>,
         tag: &[u8],
-        _start: &BytesStart<'a>,
+        start: &BytesStart<'a>,
     ) -> Result<Self, parser::Error> {
+        let mut number = None;
+        for attr in start.attributes().filter_map(|r| r.ok()) {
+            match attr.key.as_ref() {
+                b"number" => number = parse_str_as(&attr.value),
+                _ => {}
+            }
+        }
+
         let kind = match stream.peek_tag()? {
             Some(b"senza-misura") => TimeKind::SenzaMisura(stream.required(b"senza-misura")?),
             _ => {
@@ -1821,7 +1844,7 @@ impl<'a> ParseContent<'a> for Time {
 
         stream.skip_to_end(tag)?;
 
-        Ok(Self { kind })
+        Ok(Self { kind, number })
     }
 }
 
