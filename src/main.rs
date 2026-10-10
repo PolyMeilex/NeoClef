@@ -205,6 +205,15 @@ fn parse(src: &str) -> Result<midly::Smf<'static>, parser::Error> {
                     let microseconds_per_quarter_note = MINUTE.as_micros() as u64 / tempo;
                     let microseconds_per_quarter_note = microseconds_per_quarter_note as u32;
 
+                    // A sound's own offset always applies, a direction's only with sound="yes"
+                    let offset = sound
+                        .offset
+                        .as_ref()
+                        .or(direction.offset.as_ref().filter(|offset| offset.sound))
+                        .map(|offset| (offset.value / divisions) * TICKS_PER_QUARTER_NOTE_F64)
+                        .unwrap_or(0.0);
+                    let position = (position as f64 + offset).max(0.0) as usize;
+
                     events.entry(position).or_default().push(midly::TrackEvent {
                         delta: 0.into(),
                         kind: midly::TrackEventKind::Meta(midly::MetaMessage::Tempo(
@@ -709,6 +718,62 @@ mod tests {
                 <pitch><step>G</step><octave>4</octave></pitch>
                 <duration>1</duration>
                 <tie type="stop"/>
+              </note>
+            </measure>
+          </part>
+        </score-partwise>
+        );
+
+        let src = simple_xml_format(src);
+        let midi = parse(&src).unwrap();
+        insta::assert_debug_snapshot!(midi);
+    }
+
+    #[test]
+    fn direction_offset() {
+        let src = xml!(
+        <score-partwise version="4.0">
+          <part-list>
+            <score-part id="P1">
+              <part-name>Piano</part-name>
+            </score-part>
+          </part-list>
+          <part id="P1">
+            <measure number="1">
+              <attributes>
+                <divisions>2</divisions>
+              </attributes>
+              <note>
+                <pitch><step>C</step><octave>4</octave></pitch>
+                <duration>4</duration>
+              </note>
+              <direction>
+                <direction-type><words>visual only</words></direction-type>
+                <offset>-2</offset>
+                <sound tempo="60"/>
+              </direction>
+              <note>
+                <pitch><step>D</step><octave>4</octave></pitch>
+                <duration>4</duration>
+              </note>
+              <direction>
+                <direction-type><words>affects sound</words></direction-type>
+                <offset sound="yes">-2</offset>
+                <sound tempo="70"/>
+              </direction>
+              <note>
+                <pitch><step>E</step><octave>4</octave></pitch>
+                <duration>4</duration>
+              </note>
+              <direction>
+                <direction-type><words>sound offset</words></direction-type>
+                <sound tempo="80">
+                  <offset>1</offset>
+                </sound>
+              </direction>
+              <note>
+                <pitch><step>F</step><octave>4</octave></pitch>
+                <duration>4</duration>
               </note>
             </measure>
           </part>

@@ -1497,6 +1497,7 @@ impl<'a> ParseContent<'a> for Harmony {
 #[derive(Debug)]
 pub struct Direction {
     pub direction_type: Vec<DirectionType>,
+    pub offset: Option<Offset>,
     pub sound: Option<Sound>,
 }
 
@@ -1507,7 +1508,7 @@ impl<'a> ParseContent<'a> for Direction {
         _start: &BytesStart<'a>,
     ) -> Result<Self, parser::Error> {
         let direction_type = stream.one_or_more(b"direction-type")?;
-        let _offset = stream.optional::<()>(b"offset")?;
+        let offset = stream.optional(b"offset")?;
         let _footnote = stream.optional::<()>(b"footnote")?;
         let _level = stream.optional::<()>(b"level")?;
         let _voice = stream.optional::<()>(b"voice")?;
@@ -1519,6 +1520,7 @@ impl<'a> ParseContent<'a> for Direction {
 
         Ok(Self {
             direction_type,
+            offset,
             sound,
         })
     }
@@ -1599,6 +1601,7 @@ impl<'a> ParseContent<'a> for Metronome {
 #[derive(Debug)]
 pub struct Sound {
     pub tempo: Option<NonNegativeDecimal>,
+    pub offset: Option<Offset>,
 }
 
 impl<'a> ParseContent<'a> for Sound {
@@ -1616,9 +1619,46 @@ impl<'a> ParseContent<'a> for Sound {
             }
         }
 
+        while let Some(
+            tag @ (b"instrument-change" | b"midi-device" | b"midi-instrument" | b"play"),
+        ) = stream.peek_tag()?
+        {
+            let tag = tag.to_vec();
+            let _instrument_item = stream.required::<()>(&tag)?;
+        }
+        let _swing = stream.optional::<()>(b"swing")?;
+        let offset = stream.optional(b"offset")?;
+
         stream.skip_to_end(tag)?;
 
-        Ok(Self { tempo })
+        Ok(Self { tempo, offset })
+    }
+}
+
+/// https://w3c.github.io/musicxml/musicxml-reference/elements/offset/
+#[derive(Debug)]
+pub struct Offset {
+    pub value: Divisions,
+    pub sound: bool,
+}
+
+impl<'a> ParseContent<'a> for Offset {
+    fn parse(
+        stream: &mut XmlStream<'a>,
+        tag: &[u8],
+        start: &BytesStart<'a>,
+    ) -> Result<Self, parser::Error> {
+        let mut sound = false;
+        for attr in start.attributes().filter_map(|r| r.ok()) {
+            match attr.key.as_ref() {
+                b"sound" => sound = parse_yes_no(attr.value.as_ref()),
+                _ => {}
+            }
+        }
+
+        let value = Divisions::parse(stream, tag, start)?;
+
+        Ok(Self { value, sound })
     }
 }
 
