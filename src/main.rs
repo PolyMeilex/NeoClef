@@ -114,34 +114,9 @@ fn timeline(v: &musicxml::ScorePartwise) -> Vec<TimelineItem> {
 
                 let quarters = msg.duration / divisions;
 
-                if let musicxml::NoteKindStatePitchKind::Pitch(pitch) = &msg.kind {
-                    let (tie_start, tie_stop) = tie_kinds(&msg.tie);
-                    timeline.push(TimelineItem::Note(TimelineNote {
-                        start: position,
-                        duration: quarters,
-                        key: midi_note_number(pitch.step, pitch.octave, pitch.alter.unwrap_or(0.0)),
-                        velocity: note_on_velocity(note),
-                        off_velocity: note_off_velocity(note),
-                        tie_start,
-                        tie_stop,
-                    }));
-
-                    let mut peek_iter = iter.clone();
-                    while let Some(MeasureItem::Note(note)) = peek_iter.next() {
-                        let musicxml::NoteKindState::Regular(next) = &note.kind else {
-                            break;
-                        };
-                        let Some(pitch) = next.chord.as_ref().and(match &next.kind {
-                            musicxml::NoteKindStatePitchKind::Pitch(pitch) => Some(pitch),
-                            _ => None,
-                        }) else {
-                            break;
-                        };
-
-                        iter.next();
-
-                        // Chord notes share the duration of the chord's first note
-                        let (tie_start, tie_stop) = tie_kinds(&next.tie);
+                match &msg.kind {
+                    musicxml::NoteKindStatePitchKind::Pitch(pitch) => {
+                        let (tie_start, tie_stop) = tie_kinds(&msg.tie);
                         timeline.push(TimelineItem::Note(TimelineNote {
                             start: position,
                             duration: quarters,
@@ -155,11 +130,44 @@ fn timeline(v: &musicxml::ScorePartwise) -> Vec<TimelineItem> {
                             tie_start,
                             tie_stop,
                         }));
-                    }
 
-                    position += quarters;
-                } else if matches!(msg.kind, musicxml::NoteKindStatePitchKind::Rest(_)) {
-                    position += quarters;
+                        let mut peek_iter = iter.clone();
+                        while let Some(MeasureItem::Note(note)) = peek_iter.next() {
+                            let musicxml::NoteKindState::Regular(next) = &note.kind else {
+                                break;
+                            };
+                            let Some(pitch) = next.chord.as_ref().and(match &next.kind {
+                                musicxml::NoteKindStatePitchKind::Pitch(pitch) => Some(pitch),
+                                _ => None,
+                            }) else {
+                                break;
+                            };
+
+                            iter.next();
+
+                            // Chord notes share the duration of the chord's first note
+                            let (tie_start, tie_stop) = tie_kinds(&next.tie);
+                            timeline.push(TimelineItem::Note(TimelineNote {
+                                start: position,
+                                duration: quarters,
+                                key: midi_note_number(
+                                    pitch.step,
+                                    pitch.octave,
+                                    pitch.alter.unwrap_or(0.0),
+                                ),
+                                velocity: note_on_velocity(note),
+                                off_velocity: note_off_velocity(note),
+                                tie_start,
+                                tie_stop,
+                            }));
+                        }
+
+                        position += quarters;
+                    }
+                    musicxml::NoteKindStatePitchKind::Rest(_) => {
+                        position += quarters;
+                    }
+                    _ => {}
                 }
             }
             MeasureItem::Backup(backup) => {
