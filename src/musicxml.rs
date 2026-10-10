@@ -1980,14 +1980,29 @@ pub struct Note {
     pub staff: Option<u8>,
     pub beam: Vec<String>,
     pub notations: Vec<Notations>,
+    /// Note On velocity
+    pub dynamics: Option<NonNegativeDecimal>,
+    /// Note Off velocity
+    pub end_dynamics: Option<NonNegativeDecimal>,
 }
 
 impl<'a> ParseContent<'a> for Note {
     fn parse(
         stream: &mut XmlStream<'a>,
         tag: &[u8],
-        _start: &BytesStart<'a>,
+        start: &BytesStart<'a>,
     ) -> Result<Self, crate::parser::Error> {
+        let mut dynamics: Option<NonNegativeDecimal> = None;
+        let mut end_dynamics: Option<NonNegativeDecimal> = None;
+
+        for attr in start.attributes().filter_map(|r| r.ok()) {
+            match attr.key.as_ref() {
+                b"dynamics" => dynamics = parse_str_as(&attr.value),
+                b"end-dynamics" => end_dynamics = parse_str_as(&attr.value),
+                _ => {}
+            }
+        }
+
         let kind = match stream.peek_tag()? {
             Some(b"grace") => match stream.flatten()? {
                 GraceOrGraceCue::Grace(v) => NoteKindState::Grace(v),
@@ -2028,6 +2043,8 @@ impl<'a> ParseContent<'a> for Note {
             staff,
             beam,
             notations,
+            dynamics,
+            end_dynamics,
         })
     }
 }

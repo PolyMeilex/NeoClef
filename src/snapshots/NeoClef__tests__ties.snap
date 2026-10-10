@@ -1,6 +1,6 @@
 ---
 source: src/main.rs
-assertion_line: 701
+assertion_line: 721
 expression: midi
 ---
 Smf {
@@ -27,7 +27,7 @@ Smf {
                             60,
                         ),
                         vel: u7(
-                            127,
+                            90,
                         ),
                     },
                 },
@@ -63,7 +63,7 @@ Smf {
                             64,
                         ),
                         vel: u7(
-                            127,
+                            90,
                         ),
                     },
                 },
@@ -81,7 +81,7 @@ Smf {
                             67,
                         ),
                         vel: u7(
-                            127,
+                            90,
                         ),
                     },
                 },
@@ -117,7 +117,7 @@ Smf {
                             62,
                         ),
                         vel: u7(
-                            127,
+                            90,
                         ),
                     },
                 },

@@ -92,6 +92,8 @@ fn parse(src: &str) -> Result<midly::Smf<'static>, parser::Error> {
                         midi_note_number(pitch.step, pitch.octave, pitch.alter.unwrap_or(0.0));
 
                     let (tie_start, tie_stop) = tie_kinds(&msg.tie);
+                    let vel = note_on_velocity(note);
+                    let off_vel = note_off_velocity(note);
 
                     // Tied-into note continues the previous one, don't retrigger it
                     if !tie_stop {
@@ -101,7 +103,7 @@ fn parse(src: &str) -> Result<midly::Smf<'static>, parser::Error> {
                                 channel: 0.into(),
                                 message: midly::MidiMessage::NoteOn {
                                     key: pitch.into(),
-                                    vel: 127.into(),
+                                    vel: vel.into(),
                                 },
                             },
                         });
@@ -126,9 +128,10 @@ fn parse(src: &str) -> Result<midly::Smf<'static>, parser::Error> {
                             midi_note_number(pitch.step, pitch.octave, pitch.alter.unwrap_or(0.0));
 
                         let (tie_start, tie_stop) = tie_kinds(&next.tie);
+                        let vel = note_on_velocity(note);
 
                         if !tie_start {
-                            off.push(pitch);
+                            off.push((pitch, note_off_velocity(note)));
                         }
 
                         if !tie_stop {
@@ -138,7 +141,7 @@ fn parse(src: &str) -> Result<midly::Smf<'static>, parser::Error> {
                                     channel: 0.into(),
                                     message: midly::MidiMessage::NoteOn {
                                         key: pitch.into(),
-                                        vel: 127.into(),
+                                        vel: vel.into(),
                                     },
                                 },
                             });
@@ -155,20 +158,20 @@ fn parse(src: &str) -> Result<midly::Smf<'static>, parser::Error> {
                                 channel: 0.into(),
                                 message: midly::MidiMessage::NoteOff {
                                     key: pitch.into(),
-                                    vel: 0.into(),
+                                    vel: off_vel.into(),
                                 },
                             },
                         });
                     }
 
-                    for pitch in off {
+                    for (pitch, vel) in off {
                         events.entry(position).or_default().push(midly::TrackEvent {
                             delta: 0.into(),
                             kind: midly::TrackEventKind::Midi {
                                 channel: 0.into(),
                                 message: midly::MidiMessage::NoteOff {
                                     key: pitch.into(),
-                                    vel: 0.into(),
+                                    vel: vel.into(),
                                 },
                             },
                         });
@@ -234,6 +237,22 @@ fn parse(src: &str) -> Result<midly::Smf<'static>, parser::Error> {
         },
         tracks: vec![track],
     })
+}
+
+const MIDI_FORTE_VELOCITY: f64 = 90.0;
+
+fn dynamics_to_velocity(dynamics: f64) -> u8 {
+    (dynamics / 100.0 * MIDI_FORTE_VELOCITY)
+        .round()
+        .clamp(0.0, 127.0) as u8
+}
+
+fn note_on_velocity(note: &musicxml::Note) -> u8 {
+    dynamics_to_velocity(note.dynamics.unwrap_or(100.0)).max(1)
+}
+
+fn note_off_velocity(note: &musicxml::Note) -> u8 {
+    note.end_dynamics.map(dynamics_to_velocity).unwrap_or(0)
 }
 
 /// Returns `(start, stop)`, a note in the middle of a tie chain has both
