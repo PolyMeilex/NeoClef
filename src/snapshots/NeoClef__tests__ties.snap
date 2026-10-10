@@ -1,6 +1,6 @@
 ---
 source: src/main.rs
-assertion_line: 932
+assertion_line: 976
 expression: midi
 ---
 Smf {
@@ -45,6 +45,18 @@ Smf {
                 delta: u28(
                     0,
                 ),
+                kind: Meta(
+                    Tempo(
+                        u24(
+                            500000,
+                        ),
+                    ),
+                ),
+            },
+            TrackEvent {
+                delta: u28(
+                    0,
+                ),
                 kind: Midi {
                     channel: u4(
                         0,
@@ -54,7 +66,7 @@ Smf {
                             60,
                         ),
                         vel: u7(
-                            90,
+                            80,
                         ),
                     },
                 },
@@ -90,7 +102,7 @@ Smf {
                             64,
                         ),
                         vel: u7(
-                            90,
+                            80,
                         ),
                     },
                 },
@@ -108,7 +120,7 @@ Smf {
                             67,
                         ),
                         vel: u7(
-                            90,
+                            80,
                         ),
                     },
                 },
@@ -144,7 +156,7 @@ Smf {
                             62,
                         ),
                         vel: u7(
-                            90,
+                            80,
                         ),
                     },
                 },

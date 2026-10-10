@@ -17,6 +17,8 @@ const TICKS_PER_QUARTER_NOTE_F64: f64 = TICKS_PER_QUARTER_NOTE as f64;
 
 const MINUTE: Duration = Duration::from_secs(60);
 
+const DEFAULT_BPM: u32 = 120;
+
 // 1s = 1_000_000µ
 // 1m = 60_000_000µ
 
@@ -113,7 +115,7 @@ fn timeline(v: &musicxml::ScorePartwise, musescore_compat: bool) -> Vec<Timeline
     let mut timeline = Vec::new();
 
     while let Some(item) = iter.next() {
-        println!("{item:#?}");
+        log::trace!("{item:#?}");
 
         match item {
             MeasureItem::Attributes(attributes) => {
@@ -360,6 +362,7 @@ fn to_smf(timeline: &[TimelineItem], part_name: Option<&str>) -> midly::Smf<'sta
             )
         });
         if !has_key {
+            // TODO: This is a shit way to do musescore compat, kinda unnecessary but makes output diffing easier
             let after_time_signature = events
                 .iter()
                 .take_while(|event| {
@@ -374,6 +377,36 @@ fn to_smf(timeline: &[TimelineItem], part_name: Option<&str>) -> midly::Smf<'sta
                 midly::TrackEventKind::Meta(midly::MetaMessage::KeySignature(0, false)),
             );
         }
+    }
+
+    // Like MuseScore, write the MIDI default of 120 BPM when the score doesn't start with a tempo
+    let events = tracks[0].entry(0).or_default();
+    let has_tempo = events.iter().any(|event| {
+        matches!(
+            event,
+            midly::TrackEventKind::Meta(midly::MetaMessage::Tempo(..))
+        )
+    });
+    if !has_tempo {
+        // TODO: This is a shit way to do musescore compat, kinda unnecessary but makes output diffing easier
+        let after_signatures = events
+            .iter()
+            .take_while(|event| {
+                matches!(
+                    event,
+                    midly::TrackEventKind::Meta(
+                        midly::MetaMessage::TimeSignature(..)
+                            | midly::MetaMessage::KeySignature(..)
+                    )
+                )
+            })
+            .count();
+        events.insert(
+            after_signatures,
+            midly::TrackEventKind::Meta(midly::MetaMessage::Tempo(
+                (MINUTE.as_micros() as u32 / DEFAULT_BPM).into(),
+            )),
+        );
     }
 
     if let Some(part_name) = part_name {
@@ -434,7 +467,9 @@ fn dynamics_to_velocity(dynamics: f64) -> u8 {
 }
 
 fn note_on_velocity(note: &musicxml::Note) -> u8 {
-    dynamics_to_velocity(note.dynamics.unwrap_or(100.0)).max(1)
+    note.dynamics
+        .map(|dynamics| dynamics_to_velocity(dynamics).max(1))
+        .unwrap_or(80)
 }
 
 fn note_off_velocity(note: &musicxml::Note) -> u8 {
@@ -637,6 +672,8 @@ mod tests {
         };
     }
 
+    /// NOTE: RUN THIS IN RELEASE! TO SLOW FOR DEBUG!
+    ///
     /// Runs the real `musicxml::ScorePartwise` parser over every score in
     /// the `test-files/lib` submodule.
     #[test]
