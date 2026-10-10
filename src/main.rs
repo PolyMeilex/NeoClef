@@ -67,6 +67,7 @@ struct TimelineNote {
     off_velocity: u8,
     tie_start: bool,
     tie_stop: bool,
+    staff: u8,
 }
 
 #[derive(Debug)]
@@ -129,6 +130,7 @@ fn timeline(v: &musicxml::ScorePartwise) -> Vec<TimelineItem> {
                             off_velocity: note_off_velocity(note),
                             tie_start,
                             tie_stop,
+                            staff: note.staff.unwrap_or(1),
                         }));
 
                         let mut peek_iter = iter.clone();
@@ -159,6 +161,7 @@ fn timeline(v: &musicxml::ScorePartwise) -> Vec<TimelineItem> {
                                 off_velocity: note_off_velocity(note),
                                 tie_start,
                                 tie_stop,
+                                staff: note.staff.unwrap_or(1),
                             }));
                         }
 
@@ -203,12 +206,20 @@ fn timeline(v: &musicxml::ScorePartwise) -> Vec<TimelineItem> {
     timeline
 }
 
+type TrackEvents = BTreeMap<usize, Vec<midly::TrackEventKind<'static>>>;
+
 fn to_smf(timeline: &[TimelineItem]) -> midly::Smf<'static> {
-    let mut events: BTreeMap<usize, Vec<midly::TrackEventKind>> = BTreeMap::new();
+    let mut tracks: Vec<TrackEvents> = vec![TrackEvents::new()];
 
     for item in timeline {
         match item {
             TimelineItem::Note(note) => {
+                let idx = usize::from(note.staff.max(1)) - 1;
+                if tracks.len() <= idx {
+                    tracks.resize_with(idx + 1, TrackEvents::new);
+                }
+                let events = &mut tracks[idx];
+
                 if !note.tie_stop {
                     events.entry(to_ticks(note.start)).or_default().push(
                         midly::TrackEventKind::Midi {
@@ -240,7 +251,7 @@ fn to_smf(timeline: &[TimelineItem]) -> midly::Smf<'static> {
                 let microseconds_per_quarter_note = MINUTE.as_micros() as u64 / tempo;
                 let microseconds_per_quarter_note = microseconds_per_quarter_note as u32;
 
-                events
+                tracks[0]
                     .entry(to_ticks(*at))
                     .or_default()
                     .push(midly::TrackEventKind::Meta(midly::MetaMessage::Tempo(
@@ -250,6 +261,16 @@ fn to_smf(timeline: &[TimelineItem]) -> midly::Smf<'static> {
         }
     }
 
+    midly::Smf {
+        header: midly::Header {
+            format: midly::Format::Parallel,
+            timing: midly::Timing::Metrical(midly::num::u15::new(TICKS_PER_QUARTER_NOTE)),
+        },
+        tracks: tracks.into_iter().map(delta_encode).collect(),
+    }
+}
+
+fn delta_encode(events: TrackEvents) -> Vec<midly::TrackEvent<'static>> {
     let mut track = vec![];
 
     let mut prev = 0;
@@ -266,13 +287,7 @@ fn to_smf(timeline: &[TimelineItem]) -> midly::Smf<'static> {
         }
     }
 
-    midly::Smf {
-        header: midly::Header {
-            format: midly::Format::SingleTrack,
-            timing: midly::Timing::Metrical(midly::num::u15::new(TICKS_PER_QUARTER_NOTE)),
-        },
-        tracks: vec![track],
-    }
+    track
 }
 
 fn to_ticks(quarters: f64) -> usize {

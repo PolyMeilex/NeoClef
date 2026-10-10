@@ -1,11 +1,11 @@
 ---
 source: src/main.rs
-assertion_line: 721
+assertion_line: 778
 expression: midi
 ---
 Smf {
     header: Header {
-        format: SingleTrack,
+        format: Parallel,
         timing: Metrical(
             u15(
                 480,
