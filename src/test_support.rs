@@ -11,8 +11,10 @@ fn read_dir(path: PathBuf) -> impl Iterator<Item = PathBuf> + 'static {
         .filter(|path| path.extension().is_some_and(|ext| ext == "mxl"))
 }
 
+pub const SCORES_ROOT: &str = "/home/poly/Downloads/mxl";
+
 pub fn all_scores() -> Vec<PathBuf> {
-    let mut paths: Vec<_> = std::fs::read_dir("/home/poly/Downloads/mxl")
+    let mut paths: Vec<_> = std::fs::read_dir(SCORES_ROOT)
         .unwrap()
         .map(|entry| entry.unwrap().path())
         .flat_map(|path| {
@@ -280,6 +282,27 @@ pub fn all_scores() -> Vec<PathBuf> {
                 && !path.ends_with("Qmduw5cLMjA1GnyjVJ9z7gQy3ZmGAiUgokMwGZ5ryUeAsc.mxl")
             // ParseError("Invalid u8: \"-8\"")
                 && !path.ends_with("QmfMWoCzcmGQbstt6NXXBhey2CxZQ5MDN6j1ivN6VHfN52.mxl")
+            // ParseError("Invalid u32: \"\"") in <degree-value>
+                && !path.ends_with("Qmao9GY1qekJxsavgc7urBykeUwNJeLviqpbZRUDWwbaew.mxl")
+                && !path.ends_with("QmaqPYhUAucHc6vhuL1iYXxpd4F1MLXMBLrB8txxUFU7tk.mxl")
+                && !path.ends_with("Qma7KJgpB4boN4tmpFaPKkQH7nWbgeZNkpVLg7vQvXJ7Xp.mxl")
+                && !path.ends_with("Qmbrhc32PVEnQbso3NwYYMr47fXwFiNDHoLgHK7WAKrjRT.mxl")
+                && !path.ends_with("QmTPXLjSqjXZc9zZaC8PNN57NizwG3ZbiFpG1uK94s4eNw.mxl")
+                && !path.ends_with("QmWPSYe2PtCv9MBUp9y67mvUdPNEbWJxT6gQnfgEuLT4wE.mxl")
+                && !path.ends_with("QmWuPQzRhYdatEWXfZ4UqkQaZEEyPyNEBCSjUyRreZtmhB.mxl")
+                && !path.ends_with("QmXDMRHr7CQiqtoMwHjyvCW4BuUduckTT5gEypxbMBMQAQ.mxl")
+                && !path.ends_with("Qmct7TMzFKk6TvX4r3vLkEPEnjG9SaZjCmgBg6dgVAoiZW.mxl")
+                && !path.ends_with("QmPe9ejh8Q1uHCzPQyzqKtTSfLb8xpy1GRq5s9BasEeMGR.mxl")
+                && !path.ends_with("QmQTz74NHAozwdNZbi6p5qWFcFe8pPC8fuTvajBAiEwXjJ.mxl")
+            // ParseError("Invalid u32: \"7/\"") in <degree-value>
+                && !path.ends_with("QmXgMGcWMY773bnrfvmjUg5rfoEdVpKLKqniaUhtQcnkjf.mxl")
+                && !path.ends_with("QmQCSagspNjNRNVcYFRmLM5ZoCRgfuDfNPHXFk6sydsiys.mxl")
+            // ParseError("Invalid u32: \"7/5\"") in <degree-value>
+                && !path.ends_with("Qmf5d4Ceux8JjfewMq3z7rNxY2vLTvR79jLM5fjkrspsPJ.mxl")
+                && !path.ends_with("QmRdxFGy4AsMx3uHLsLL9v7x2EDUrDiMwrc1qHEiK1Sgoo.mxl")
+            // ParseError("Invalid u32: \"7/9\"") in <degree-value>
+                && !path.ends_with("Qmf62FQ2J9VoFvVvN2GZBf1jd1JadjZfE654LnpRRi3KAR.mxl")
+                && !path.ends_with("QmQPPKnKfWr2kTGbXL42WmDF1r3QnHbJFfCXbCKqqALpdR.mxl")
         })
         .collect();
 
