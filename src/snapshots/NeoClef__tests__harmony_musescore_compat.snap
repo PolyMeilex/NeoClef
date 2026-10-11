@@ -1,6 +1,6 @@
 ---
 source: src/main.rs
-assertion_line: 1162
+assertion_line: 1037
 expression: "parse(&src, true).unwrap()"
 ---
 Smf {
@@ -14,34 +14,6 @@ Smf {
     },
     tracks: [
         [
-            TrackEvent {
-                delta: u28(
-                    0,
-                ),
-                kind: Meta(
-                    TrackName(
-                        [
-                            71,
-                            117,
-                            105,
-                            116,
-                            97,
-                            114,
-                        ],
-                    ),
-                ),
-            },
-            TrackEvent {
-                delta: u28(
-                    0,
-                ),
-                kind: Meta(
-                    KeySignature(
-                        0,
-                        false,
-                    ),
-                ),
-            },
             TrackEvent {
                 delta: u28(
                     0,
