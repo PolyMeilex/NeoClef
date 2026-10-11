@@ -71,7 +71,7 @@ enum TimelineItem {
     KeySignature(TimelineKeySignature),
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 struct TimelineNote {
     start: f64,
     duration: f64,
@@ -108,11 +108,7 @@ struct TimelineTempo {
 fn timeline(v: &musicxml::ScorePartwise, musescore_compat: bool) -> Vec<TimelineItem> {
     assert_eq!(v.part.len(), 1);
 
-    let mut iter = v
-        .part
-        .iter()
-        .flat_map(|part| &part.measure)
-        .flat_map(|measure| &measure.content);
+    let measures = v.part.iter().flat_map(|part| &part.measure);
 
     let mut divisions = 1.0;
     let mut position = 0.0f64;
@@ -122,162 +118,169 @@ fn timeline(v: &musicxml::ScorePartwise, musescore_compat: bool) -> Vec<Timeline
     let mut timeline = Vec::new();
     let mut chord_symbols = Vec::new();
 
-    while let Some(item) = iter.next() {
-        log::trace!("{item:#?}");
+    for measure in measures {
+        let mut iter = measure.content.iter();
 
-        match item {
-            MeasureItem::Attributes(attributes) => {
-                if let Some(d) = attributes.divisions.as_ref() {
-                    divisions = *d;
-                }
-                if let Some(s) = attributes.staves {
-                    staves = s;
-                }
+        while let Some(item) = iter.next() {
+            log::trace!("{item:#?}");
 
-                for time in &attributes.time {
-                    if let Some(1) | None = time.number
-                        && let musicxml::TimeKind::Signature { signatures, .. } = &time.kind
-                        && let Some((numerator, denominator)) = time_signature(signatures)
-                    {
-                        timeline.push(TimelineItem::TimeSignature(TimelineTimeSignature {
-                            at: position,
-                            numerator,
-                            denominator,
-                        }));
+            match item {
+                MeasureItem::Attributes(attributes) => {
+                    if let Some(d) = attributes.divisions.as_ref() {
+                        divisions = *d;
                     }
-                }
-
-                for key in &attributes.key {
-                    if let musicxml::KeyKind::Traditional(traditional) = &key.kind {
-                        timeline.push(TimelineItem::KeySignature(TimelineKeySignature {
-                            at: position,
-                            fifths: traditional.fifths.clamp(-7, 7) as i8,
-                            staff: key.number,
-                        }));
+                    if let Some(s) = attributes.staves {
+                        staves = s;
                     }
-                }
 
-                // assert_eq!(
-                //     attributes.time,
-                //     vec![musicxml::Time {
-                //         beats: "4".into(),
-                //         beat_type: "4".into(),
-                //     }],
-                // );
-            }
-            MeasureItem::Note(note) => {
-                let musicxml::NoteKindState::Regular(msg) = &note.kind else {
-                    todo!()
-                };
-                assert!(msg.chord.is_none());
-
-                let quarters = msg.duration / divisions;
-
-                match &msg.kind {
-                    musicxml::NoteKindStatePitchKind::Pitch(pitch) => {
-                        let (tie_start, tie_stop) = tie_kinds(&msg.tie);
-                        timeline.push(TimelineItem::Note(TimelineNote {
-                            start: position,
-                            duration: quarters,
-                            key: midi_note_number(
-                                pitch.step,
-                                pitch.octave,
-                                pitch.alter.unwrap_or(0.0),
-                            ),
-                            velocity: note_on_velocity(note),
-                            off_velocity: note_off_velocity(note),
-                            tie_start,
-                            tie_stop,
-                            staff: note.staff.unwrap_or(1),
-                            channel: 0,
-                        }));
-
-                        let mut peek_iter = iter.clone();
-                        while let Some(MeasureItem::Note(note)) = peek_iter.next() {
-                            let musicxml::NoteKindState::Regular(next) = &note.kind else {
-                                break;
-                            };
-                            let Some(pitch) = next.chord.as_ref().and(match &next.kind {
-                                musicxml::NoteKindStatePitchKind::Pitch(pitch) => Some(pitch),
-                                _ => None,
-                            }) else {
-                                break;
-                            };
-
-                            iter.next();
-
-                            // Chord notes share the duration of the chord's first note
-                            let (tie_start, tie_stop) = tie_kinds(&next.tie);
-                            timeline.push(TimelineItem::Note(TimelineNote {
-                                start: position,
-                                duration: quarters,
-                                key: midi_note_number(
-                                    pitch.step,
-                                    pitch.octave,
-                                    pitch.alter.unwrap_or(0.0),
-                                ),
-                                velocity: note_on_velocity(note),
-                                off_velocity: note_off_velocity(note),
-                                tie_start,
-                                tie_stop,
-                                staff: note.staff.unwrap_or(1),
-                                channel: 0,
+                    for time in &attributes.time {
+                        if let Some(1) | None = time.number
+                            && let musicxml::TimeKind::Signature { signatures, .. } = &time.kind
+                            && let Some((numerator, denominator)) = time_signature(signatures)
+                        {
+                            timeline.push(TimelineItem::TimeSignature(TimelineTimeSignature {
+                                at: position,
+                                numerator,
+                                denominator,
                             }));
                         }
-
-                        position += quarters;
                     }
-                    musicxml::NoteKindStatePitchKind::Rest(_) => {
-                        position += quarters;
+
+                    for key in &attributes.key {
+                        if let musicxml::KeyKind::Traditional(traditional) = &key.kind {
+                            timeline.push(TimelineItem::KeySignature(TimelineKeySignature {
+                                at: position,
+                                fifths: traditional.fifths.clamp(-7, 7) as i8,
+                                staff: key.number,
+                            }));
+                        }
                     }
-                    _ => {}
                 }
-            }
-            MeasureItem::Backup(backup) => {
-                position = (position - backup.duration / divisions).max(0.0);
-            }
-            MeasureItem::Forward(forward) => {
-                position += forward.duration / divisions;
-            }
-            MeasureItem::Print(_) => {}
-            MeasureItem::Barline(_) => {}
-            MeasureItem::Harmony(harmony) => {
-                if let Some(keys) = chord_symbol::realize(harmony) {
-                    let offset = harmony
-                        .offset
-                        .as_ref()
-                        // MuseScore ignores `sound`, like for directions
-                        .filter(|offset| offset.sound || musescore_compat)
-                        .map(|offset| offset.value / divisions)
-                        .unwrap_or(0.0);
+                MeasureItem::Note(note) => {
+                    let msg = match &note.kind {
+                        // Grace notes take no time, and aren't played, cause I don't care, it brings too much complexity
+                        musicxml::NoteKindState::Grace(_)
+                        | musicxml::NoteKindState::GraceCue(_) => continue,
+                        musicxml::NoteKindState::Cue(_) | musicxml::NoteKindState::Regular(_) => {
+                            full_note(note).unwrap()
+                        }
+                    };
+                    assert!(!msg.chord);
 
-                    let staff = harmony
-                        .staff
-                        .filter(|staff| (1..=staves).contains(&u32::from(*staff)))
-                        .unwrap_or(1);
+                    let quarters = msg.duration / divisions;
 
-                    chord_symbols.push((staff, (position + offset).max(0.0), keys));
+                    match msg.kind {
+                        musicxml::NoteKindStatePitchKind::Pitch(pitch) => {
+                            if msg.play {
+                                let (tie_start, tie_stop) = tie_kinds(msg.tie);
+                                timeline.push(TimelineItem::Note(TimelineNote {
+                                    start: position,
+                                    duration: quarters,
+                                    key: midi_note_number(
+                                        pitch.step,
+                                        pitch.octave,
+                                        pitch.alter.unwrap_or(0.0),
+                                    ),
+                                    velocity: note_on_velocity(note),
+                                    off_velocity: note_off_velocity(note),
+                                    tie_start,
+                                    tie_stop,
+                                    staff: note.staff.unwrap_or(1),
+                                    channel: 0,
+                                }));
+                            }
+
+                            let mut peek_iter = iter.clone();
+                            while let Some(MeasureItem::Note(note)) = peek_iter.next() {
+                                let Some(next) = full_note(note) else {
+                                    break;
+                                };
+                                let Some(pitch) = next.chord.then_some(()).and(match next.kind {
+                                    musicxml::NoteKindStatePitchKind::Pitch(pitch) => Some(pitch),
+                                    _ => None,
+                                }) else {
+                                    break;
+                                };
+
+                                iter.next();
+
+                                if !next.play {
+                                    continue;
+                                }
+
+                                // Chord notes share the duration of the chord's first note
+                                let (tie_start, tie_stop) = tie_kinds(next.tie);
+                                timeline.push(TimelineItem::Note(TimelineNote {
+                                    start: position,
+                                    duration: quarters,
+                                    key: midi_note_number(
+                                        pitch.step,
+                                        pitch.octave,
+                                        pitch.alter.unwrap_or(0.0),
+                                    ),
+                                    velocity: note_on_velocity(note),
+                                    off_velocity: note_off_velocity(note),
+                                    tie_start,
+                                    tie_stop,
+                                    staff: note.staff.unwrap_or(1),
+                                    channel: 0,
+                                }));
+                            }
+
+                            position += quarters;
+                        }
+                        musicxml::NoteKindStatePitchKind::Rest(_) => {
+                            position += quarters;
+                        }
+                        _ => {}
+                    }
                 }
-            }
-            MeasureItem::Direction(direction) => {
-                if let Some(sound) = direction.sound.as_ref()
-                    && let Some(tempo) = sound.tempo.as_ref()
-                {
-                    let offset = sound
-                        .offset
-                        .as_ref()
-                        .or(direction
+                MeasureItem::Backup(backup) => {
+                    position = (position - backup.duration / divisions).max(0.0);
+                }
+                MeasureItem::Forward(forward) => {
+                    position += forward.duration / divisions;
+                }
+                MeasureItem::Print(_) => {}
+                MeasureItem::Barline(_) => {}
+                MeasureItem::Harmony(harmony) => {
+                    if let Some(keys) = chord_symbol::realize(harmony) {
+                        let offset = harmony
                             .offset
                             .as_ref()
-                            // Why does MuseScore ignore this? Spec seems to suggest I should filter here
-                            .filter(|offset| offset.sound || musescore_compat))
-                        .map(|offset| offset.value / divisions)
-                        .unwrap_or(0.0);
+                            // MuseScore ignores `sound`, like for directions
+                            .filter(|offset| offset.sound || musescore_compat)
+                            .map(|offset| offset.value / divisions)
+                            .unwrap_or(0.0);
 
-                    timeline.push(TimelineItem::Tempo(TimelineTempo {
-                        at: (position + offset).max(0.0),
-                        bpm: *tempo,
-                    }));
+                        let staff = harmony
+                            .staff
+                            .filter(|staff| (1..=staves).contains(&u32::from(*staff)))
+                            .unwrap_or(1);
+
+                        chord_symbols.push((staff, (position + offset).max(0.0), keys));
+                    }
+                }
+                MeasureItem::Direction(direction) => {
+                    if let Some(sound) = direction.sound.as_ref()
+                        && let Some(tempo) = sound.tempo.as_ref()
+                    {
+                        let offset = sound
+                            .offset
+                            .as_ref()
+                            .or(direction
+                                .offset
+                                .as_ref()
+                                // Why does MuseScore ignore this? Spec seems to suggest I should filter here
+                                .filter(|offset| offset.sound || musescore_compat))
+                            .map(|offset| offset.value / divisions)
+                            .unwrap_or(0.0);
+
+                        timeline.push(TimelineItem::Tempo(TimelineTempo {
+                            at: (position + offset).max(0.0),
+                            bpm: *tempo,
+                        }));
+                    }
                 }
             }
         }
@@ -565,6 +568,36 @@ fn time_signature(signatures: &[musicxml::TimeSignature]) -> Option<(u8, u8)> {
         u8::try_from(numerator).ok()?,
         u8::try_from(denominator).ok()?,
     ))
+}
+
+/// The parts of a regular or cue note
+struct FullNote<'a> {
+    chord: bool,
+    kind: &'a musicxml::NoteKindStatePitchKind,
+    duration: f64,
+    tie: &'a [musicxml::Tie],
+    /// Cue notes don't play
+    play: bool,
+}
+
+fn full_note(note: &musicxml::Note) -> Option<FullNote<'_>> {
+    match &note.kind {
+        musicxml::NoteKindState::Regular(msg) => Some(FullNote {
+            chord: msg.chord.is_some(),
+            kind: &msg.kind,
+            duration: msg.duration,
+            tie: &msg.tie,
+            play: true,
+        }),
+        musicxml::NoteKindState::Cue(msg) => Some(FullNote {
+            chord: msg.chord.is_some(),
+            kind: &msg.kind,
+            duration: msg.duration,
+            tie: &msg.tie,
+            play: false,
+        }),
+        musicxml::NoteKindState::Grace(_) | musicxml::NoteKindState::GraceCue(_) => None,
+    }
 }
 
 /// Returns `(start, stop)`, a note in the middle of a tie chain has both
@@ -1202,42 +1235,56 @@ mod tests {
         insta::assert_debug_snapshot!(midi);
     }
 
+    /// Grace notes are skipped without moving other notes, cue notes are silent but take time
     #[test]
     fn grace_cue() {
-        let src = xml!(
-        <score-partwise>
-          <work>
-          </work>
-          <credit/>
-          <credit/>
+        let src = r#"
+        <score-partwise version="4.0">
           <part-list>
+            <score-part id="P1"><part-name>Piano</part-name></score-part>
           </part-list>
           <part id="P1">
-            <measure>
-              <note>
-                <grace slash="yes"/>
-                <cue/>
-                <pitch><step>D</step><octave>5</octave></pitch>
-                <duration>1</duration>
-              </note>
+            <measure number="1">
+              <attributes>
+                <divisions>2</divisions>
+                <time><beats>4</beats><beat-type>4</beat-type></time>
+              </attributes>
+              <note><pitch><step>C</step><octave>4</octave></pitch><duration>2</duration><type>quarter</type></note>
+              <note><grace/><pitch><step>D</step><octave>5</octave></pitch><type>eighth</type></note>
+              <note><pitch><step>E</step><octave>4</octave></pitch><duration>2</duration><type>quarter</type></note>
+              <note><grace slash="yes"/><pitch><step>F</step><octave>5</octave></pitch><type>eighth</type></note>
+              <note><grace slash="yes"/><pitch><step>G</step><octave>5</octave></pitch><type>eighth</type></note>
+              <note><pitch><step>G</step><octave>4</octave></pitch><duration>2</duration><type>quarter</type></note>
+              <note><grace/><pitch><step>B</step><octave>5</octave></pitch><type>16th</type></note>
+              <note><pitch><step>A</step><octave>4</octave></pitch><duration>2</duration><type>quarter</type>
+                <notations><ornaments><trill-mark/></ornaments></notations></note>
+            </measure>
+            <measure number="2">
+              <note><pitch><step>C</step><octave>5</octave></pitch><duration>4</duration><type>half</type></note>
+              <note><grace steal-time-previous="50"/><pitch><step>D</step><octave>5</octave></pitch><type>eighth</type></note>
+              <note><grace/><pitch><step>C</step><octave>6</octave></pitch><type>16th</type></note>
+              <note><grace/><pitch><step>E</step><octave>6</octave></pitch><type>16th</type></note>
+              <note><grace/><chord/><pitch><step>G</step><octave>6</octave></pitch><type>16th</type></note>
+              <note><pitch><step>E</step><octave>5</octave></pitch><duration>3</duration><type>quarter</type><dot/></note>
+              <note><grace/><pitch><step>F</step><octave>5</octave></pitch><type>eighth</type></note>
+              <note><grace/><pitch><step>G</step><octave>5</octave></pitch><type>eighth</type></note>
+            </measure>
+            <measure number="3">
+              <note><grace/><cue/><pitch><step>G</step><octave>5</octave></pitch><type>eighth</type></note>
+              <note><pitch><step>C</step><octave>4</octave></pitch><duration>2</duration><type>quarter</type></note>
+              <note><grace/><pitch><step>A</step><octave>5</octave></pitch><type>eighth</type></note>
+              <note><cue/><pitch><step>D</step><octave>4</octave></pitch><duration>2</duration><type>quarter</type></note>
+              <note><grace/><pitch><step>B</step><octave>5</octave></pitch><type>quarter</type></note>
+              <note><pitch><step>E</step><octave>4</octave></pitch><duration>2</duration><type>quarter</type>
+                <notations><slur type="start"/></notations></note>
+              <note><grace/><pitch><step>F</step><octave>4</octave></pitch><type>eighth</type>
+                <notations><slur type="stop"/></notations></note>
+              <note><pitch><step>G</step><octave>4</octave></pitch><duration>2</duration><type>quarter</type></note>
             </measure>
           </part>
-          <!-- <part id="P1"> -->
-          <!--   <measure> -->
-          <!--     <note> -->
-          <!--       <grace slash="yes"/> -->
-          <!--       <cue/> -->
-          <!--       <pitch><step>D</step><octave>5</octave></pitch> -->
-          <!--       <duration>1</duration> -->
-          <!--     </note> -->
-          <!--   </measure> -->
-          <!-- </part> -->
         </score-partwise>
-        );
+        "#;
 
-        // let span = &src[108..224];
-        // println!("{span}");
-
-        // parse2(src);
+        insta::assert_debug_snapshot!(parse(src, false).unwrap());
     }
 }

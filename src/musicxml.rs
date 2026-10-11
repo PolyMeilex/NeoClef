@@ -2097,9 +2097,46 @@ impl<'a> ParseContentFlat<'a> for NoteKindStatePitchKind {
     }
 }
 
+/// https://w3c.github.io/musicxml/musicxml-reference/elements/grace/
+#[derive(Debug, Clone, Default)]
+pub struct Grace {
+    /// Percentage of time to steal from the previous note
+    pub steal_time_previous: Option<Percent>,
+    /// Percentage of time to steal from the following note, as for appoggiaturas
+    pub steal_time_following: Option<Percent>,
+    /// Make time instead of stealing it, in real-time divisions
+    pub make_time: Option<Divisions>,
+    /// Slashed grace note (acciaccatura)
+    pub slash: Option<bool>,
+}
+
+impl<'a> ParseContent<'a> for Grace {
+    fn parse(
+        stream: &mut XmlStream<'a>,
+        tag: &[u8],
+        start: &BytesStart<'a>,
+    ) -> Result<Self, parser::Error> {
+        let mut this = Self::default();
+        for attr in start.attributes().filter_map(|r| r.ok()) {
+            match attr.key.as_ref() {
+                b"steal-time-previous" => this.steal_time_previous = parse_str_as(&attr.value),
+                b"steal-time-following" => this.steal_time_following = parse_str_as(&attr.value),
+                b"make-time" => this.make_time = parse_str_as(&attr.value),
+                b"slash" => this.slash = Some(parse_yes_no(attr.value.as_ref())),
+                _ => {}
+            }
+        }
+
+        stream.skip_to_end(tag)?;
+
+        Ok(this)
+    }
+}
+
 /// https://w3c.github.io/musicxml/musicxml-reference/elements/note/
 #[derive(Debug, Clone)]
 pub struct NoteKindStateGrace {
+    pub grace: Grace,
     pub chord: Option<Chord>,
     pub kind: NoteKindStatePitchKind,
     pub tie: Vec<Tie>,
@@ -2107,6 +2144,7 @@ pub struct NoteKindStateGrace {
 
 #[derive(Debug, Clone)]
 pub struct NoteKindStateGraceCue {
+    pub grace: Grace,
     pub chord: Option<Chord>,
     pub kind: NoteKindStatePitchKind,
 }
@@ -2119,18 +2157,23 @@ enum GraceOrGraceCue {
 
 impl<'a> ParseContentFlat<'a> for GraceOrGraceCue {
     fn parse(stream: &mut XmlStream<'a>) -> std::prelude::v1::Result<Self, parser::Error> {
-        let _grace: () = stream.required(b"grace")?;
+        let grace = stream.required(b"grace")?;
         match stream.optional::<()>(b"cue")? {
             Some(_) => {
                 let chord = stream.optional(b"chord")?;
                 let kind = stream.flatten()?;
-                Ok(Self::GraceCue(NoteKindStateGraceCue { chord, kind }))
+                Ok(Self::GraceCue(NoteKindStateGraceCue { grace, chord, kind }))
             }
             None => {
                 let chord = stream.optional(b"chord")?;
                 let kind = stream.flatten()?;
                 let tie = stream.zero_or_more(b"tie")?;
-                Ok(Self::Grace(NoteKindStateGrace { chord, kind, tie }))
+                Ok(Self::Grace(NoteKindStateGrace {
+                    grace,
+                    chord,
+                    kind,
+                    tie,
+                }))
             }
         }
     }
