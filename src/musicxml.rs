@@ -932,6 +932,7 @@ impl<'a> ParseContent<'a> for Attributes {
 /// https://w3c.github.io/musicxml/musicxml-reference/elements/barline/
 #[derive(Debug)]
 pub struct Barline {
+    pub location: RightLeftMiddle,
     pub bar_style: Option<String>,
     pub wavy_line: Option<WavyLine>,
     pub segno: bool,
@@ -945,8 +946,15 @@ impl<'a> ParseContent<'a> for Barline {
     fn parse(
         stream: &mut XmlStream<'a>,
         tag: &[u8],
-        _start: &BytesStart<'a>,
+        start: &BytesStart<'a>,
     ) -> Result<Self, parser::Error> {
+        let mut location = RightLeftMiddle::Right;
+        for attr in start.attributes().filter_map(|r| r.ok()) {
+            if attr.key.as_ref() == b"location" {
+                location = RightLeftMiddle::parse(attr.value.as_ref()).unwrap_or(location);
+            }
+        }
+
         let bar_style = stream.optional(b"bar-style")?;
         let _footnote = stream.optional::<()>(b"footnote")?;
         let _level = stream.optional::<()>(b"level")?;
@@ -960,6 +968,7 @@ impl<'a> ParseContent<'a> for Barline {
         stream.skip_to_end(tag)?;
 
         Ok(Self {
+            location,
             bar_style,
             wavy_line,
             segno,
@@ -968,6 +977,29 @@ impl<'a> ParseContent<'a> for Barline {
             ending,
             repeat,
         })
+    }
+}
+
+/// https://w3c.github.io/musicxml/musicxml-reference/data-types/right-left-middle/
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RightLeftMiddle {
+    Right,
+    Left,
+    Middle,
+}
+
+impl RightLeftMiddle {
+    fn parse(bytes: &[u8]) -> Option<Self> {
+        let v = match bytes {
+            b"right" => RightLeftMiddle::Right,
+            b"left" => RightLeftMiddle::Left,
+            b"middle" => RightLeftMiddle::Middle,
+            other => {
+                error!("Unexpected right-left-middle: {other:?}");
+                return None;
+            }
+        };
+        Some(v)
     }
 }
 
@@ -1194,6 +1226,7 @@ impl BackwardForward {
 pub struct Repeat {
     pub direction: BackwardForward,
     pub times: Option<u32>,
+    pub after_jump: Option<bool>,
 }
 
 impl<'a> ParseContent<'a> for Repeat {
@@ -1204,10 +1237,12 @@ impl<'a> ParseContent<'a> for Repeat {
     ) -> Result<Self, parser::Error> {
         let mut direction = None;
         let mut times = None;
+        let mut after_jump = None;
         for attr in start.attributes().filter_map(|r| r.ok()) {
             match attr.key.as_ref() {
                 b"direction" => direction = BackwardForward::parse(attr.value.as_ref()),
                 b"times" => times = parse_str_as(&attr.value),
+                b"after-jump" => after_jump = Some(parse_yes_no(attr.value.as_ref())),
                 _ => {}
             }
         }
@@ -1221,6 +1256,7 @@ impl<'a> ParseContent<'a> for Repeat {
                 ))
             })?,
             times,
+            after_jump,
         })
     }
 }
