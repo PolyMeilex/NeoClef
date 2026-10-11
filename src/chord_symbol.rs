@@ -22,29 +22,38 @@ pub fn realize(harmony: &Harmony) -> Option<Vec<u8>> {
     let mut tones = kind_tones(chord.kind.value).to_vec();
 
     for degree in &chord.degrees {
-        let value = degree.value as i32;
         let alter = degree.alter.round() as i32;
 
-        // MuseScore's importer drops these
-        if !(1..=13).contains(&value) || !(-2..=2).contains(&alter) {
+        let Ok(value) = u8::try_from(degree.value) else {
+            continue;
+        };
+
+        if !(1..=13).contains(&value) {
             continue;
         }
 
-        // The 7th of a sus chord is the dominant one, `7sus4`
-        let suspended = matches!(
-            chord.kind.value,
-            HarmonyKind::SuspendedSecond | HarmonyKind::SuspendedFourth
-        );
+        if !(-2..=2).contains(&alter) {
+            continue;
+        }
 
-        let alter = if suspended && value == 7 && degree.kind == DegreeType::Add {
-            alter - 1
-        } else {
-            alter
+        // Per spec https://musicxml.formats.music/musicxml-reference/elements/degree-alter/
+        // I believe the we should use dominant intervals,
+        // but this causes mismatch with MuseScore output, not sure yet why, but I'll follow my
+        // understanding of the spec for now
+        let base = match degree.kind {
+            DegreeType::Add => dominant_interval(value),
+            // Relative to the chord's own degree, if it has one
+            DegreeType::Alter => tones
+                .iter()
+                .find(|(d, _)| *d == value)
+                .map_or_else(|| dominant_interval(value), |(_, interval)| *interval),
+            DegreeType::Subtract => 0,
         };
 
         tones.retain(|(d, _)| *d != value);
+
         if degree.kind != DegreeType::Subtract {
-            tones.push((value, degree_interval(value) + alter));
+            tones.push((value, base + alter));
         }
     }
 
@@ -87,13 +96,13 @@ fn pitch_class(step: Step, alter: f64) -> Option<i32> {
     Some(base + alter)
 }
 
-/// Semitones from the root to an unaltered degree of a major scale
-fn degree_interval(degree: i32) -> i32 {
-    [0, 2, 4, 5, 7, 9, 11][((degree - 1) % 7) as usize]
+fn dominant_interval(degree: u8) -> i32 {
+    let intervals = [0, 2, 4, 5, 7, 9, 10];
+    intervals[usize::from(degree - 1) % intervals.len()]
 }
 
 /// ret: (degree, semitones above the root)
-fn kind_tones(kind: HarmonyKind) -> &'static [(i32, i32)] {
+fn kind_tones(kind: HarmonyKind) -> &'static [(u8, i32)] {
     use HarmonyKind::*;
     match kind {
         Major | Pedal | Italian => &[(3, 4), (5, 7)],
@@ -123,5 +132,71 @@ fn kind_tones(kind: HarmonyKind) -> &'static [(i32, i32)] {
         Power => &[(5, 7)],
         // MuseScore doesn't understand these and plays just the root
         Neapolitan | French | German | Tristan | Other | None => &[],
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::parser::XmlStream;
+
+    /// ret: keys of a chord with a single degree
+    fn realize_degree(
+        root: &str,
+        kind: &str,
+        value: u32,
+        alter: i32,
+        degree_type: &str,
+    ) -> Vec<u8> {
+        let src = format!(
+            "<harmony>
+              <root><root-step>{root}</root-step></root>
+              <kind>{kind}</kind>
+              <degree>
+                <degree-value>{value}</degree-value>
+                <degree-alter>{alter}</degree-alter>
+                <degree-type>{degree_type}</degree-type>
+              </degree>
+            </harmony>"
+        );
+        let mut stream = XmlStream::new("test", &src);
+        let harmony = stream.required::<Harmony>(b"harmony").unwrap();
+        realize(&harmony).unwrap()
+    }
+
+    #[test]
+    fn sus4_add_seventh_is_dominant() {
+        // G7sus4: G, C, D, F
+        assert_eq!(
+            realize_degree("G", "suspended-fourth", 7, 0, "add"),
+            [43, 60, 62, 65, 67]
+        );
+    }
+
+    #[test]
+    fn add_is_relative_to_dominant() {
+        // C7: C, E, G, Bb
+        assert_eq!(
+            realize_degree("C", "major", 7, 0, "add"),
+            [36, 60, 64, 67, 70]
+        );
+    }
+
+    #[test]
+    fn alter_is_relative_to_kind() {
+        // Cdim(#5): C, Eb, G
+        assert_eq!(
+            realize_degree("C", "diminished", 5, 1, "alter"),
+            [36, 60, 63, 67]
+        );
+    }
+
+    #[test]
+    fn alter_missing_degree_is_relative_to_dominant() {
+        // C(b7) where the chord has no 7th: C, E, G, A
+        assert_eq!(
+            realize_degree("C", "major", 7, -1, "alter"),
+            [36, 60, 64, 67, 69]
+        );
     }
 }
