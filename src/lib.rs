@@ -18,6 +18,7 @@ mod test_support;
 const TICKS_PER_QUARTER_NOTE: u16 = 480;
 const TICKS_PER_QUARTER_NOTE_F64: f64 = TICKS_PER_QUARTER_NOTE as f64;
 
+const SECOND: Duration = Duration::from_secs(1);
 const MINUTE: Duration = Duration::from_secs(60);
 
 const DEFAULT_BPM: u32 = 120;
@@ -90,7 +91,7 @@ struct TimelineNote {
 #[derive(Debug)]
 struct TimelineTempo {
     at: f64,
-    bpm: f64,
+    bps: f64,
 }
 
 fn timeline(v: &musicxml::ScorePartwise, musescore_compat: bool) -> Vec<TimelineItem> {
@@ -104,6 +105,10 @@ fn timeline(v: &musicxml::ScorePartwise, musescore_compat: bool) -> Vec<Timeline
 
     let mut timeline = Vec::new();
     let mut chord_symbols = Vec::new();
+    // (start, time stretch) of notes and rests with a fermata
+    let mut fermatas = Vec::new();
+    // Where notes and rests start, a fermata lasts until the next one
+    let mut onsets = Vec::new();
 
     for measure in measures {
         let mut iter = measure.content.iter();
@@ -132,6 +137,10 @@ fn timeline(v: &musicxml::ScorePartwise, musescore_compat: bool) -> Vec<Timeline
                     assert!(!msg.chord);
 
                     let quarters = msg.duration / divisions;
+                    onsets.push(position);
+                    if let Some(stretch) = fermata_stretch(note) {
+                        fermatas.push((position, stretch));
+                    }
 
                     match msg.kind {
                         musicxml::NoteKindStatePitchKind::Pitch(pitch) => {
@@ -167,6 +176,9 @@ fn timeline(v: &musicxml::ScorePartwise, musescore_compat: bool) -> Vec<Timeline
                                 };
 
                                 iter.next();
+                                if let Some(stretch) = fermata_stretch(note) {
+                                    fermatas.push((position, stretch));
+                                }
 
                                 if !next.play {
                                     continue;
@@ -242,7 +254,7 @@ fn timeline(v: &musicxml::ScorePartwise, musescore_compat: bool) -> Vec<Timeline
 
                         timeline.push(TimelineItem::Tempo(TimelineTempo {
                             at: (position + offset).max(0.0),
-                            bpm: *tempo,
+                            bps: round_tempo(*tempo / 60.0),
                         }));
                     }
                 }
@@ -257,6 +269,47 @@ fn timeline(v: &musicxml::ScorePartwise, musescore_compat: bool) -> Vec<Timeline
             _ => None,
         })
         .fold(position, f64::max);
+
+    // A fermata divides the tempo by its time stretch, and the tempo goes back
+    // just before the next note or rest.
+    // For several fermatas at once (other staves, chord notes), the longest one wins
+    let mut longest_fermatas = BTreeMap::new();
+    for (start, stretch) in fermatas {
+        let longest = longest_fermatas
+            .entry(to_ticks(start))
+            .or_insert((start, stretch));
+        longest.1 = longest.1.max(stretch);
+    }
+
+    for (tick, (start, stretch)) in longest_fermatas {
+        // The last tempo change at or before the fermata
+        let bps = timeline
+            .iter()
+            .filter_map(|item| match item {
+                TimelineItem::Tempo(tempo) if to_ticks(tempo.at) <= tick => Some(tempo),
+                _ => None,
+            })
+            .max_by_key(|tempo| to_ticks(tempo.at))
+            .map_or(f64::from(DEFAULT_BPM) / 60.0, |tempo| tempo.bps);
+        let stop = onsets
+            .iter()
+            .copied()
+            .filter(|&onset| to_ticks(onset) > tick)
+            .fold(end, f64::min);
+
+        // The fermata replaces a tempo change at its start
+        timeline.retain(
+            |item| !matches!(item, TimelineItem::Tempo(tempo) if to_ticks(tempo.at) == tick),
+        );
+        timeline.push(TimelineItem::Tempo(TimelineTempo {
+            at: start,
+            bps: round_tempo(bps / stretch),
+        }));
+        timeline.push(TimelineItem::Tempo(TimelineTempo {
+            at: stop - 1.0 / TICKS_PER_QUARTER_NOTE_F64,
+            bps,
+        }));
+    }
 
     // Like MuseScore, chord symbols last until the next one on the same staff, or the end
     chord_symbols.sort_by(|(staff_a, start_a, _), (staff_b, start_b, _)| {
@@ -334,9 +387,9 @@ fn to_smf(timeline: &[TimelineItem]) -> midly::Smf<'static> {
                         });
                 }
             }
-            TimelineItem::Tempo(TimelineTempo { at, bpm }) if *bpm > 0.0 => {
+            TimelineItem::Tempo(TimelineTempo { at, bps }) if *bps > 0.0 => {
                 let microseconds_per_quarter_note =
-                    (MINUTE.as_micros() as f64 / bpm).round() as u32;
+                    (SECOND.as_micros() as f64 / bps).round() as u32;
 
                 tracks[0]
                     .entry(to_ticks(*at))
@@ -400,6 +453,12 @@ fn delta_encode(events: TrackEvents) -> Vec<midly::TrackEvent<'static>> {
     track
 }
 
+/// Like MuseScore, tempos are rounded to 6 decimal places
+fn round_tempo(bps: f64) -> f64 {
+    let scale = 10f64.powi(6);
+    (bps * scale + 0.5).floor() / scale
+}
+
 fn to_ticks(quarters: f64) -> usize {
     (quarters * TICKS_PER_QUARTER_NOTE_F64).round() as usize
 }
@@ -450,6 +509,23 @@ fn full_note(note: &musicxml::Note) -> Option<FullNote<'_>> {
         }),
         musicxml::NoteKindState::Grace(_) | musicxml::NoteKindState::GraceCue(_) => None,
     }
+}
+
+/// How much longer a note or rest with a fermata lasts
+fn fermata_stretch(note: &musicxml::Note) -> Option<f64> {
+    use musicxml::FermataShape;
+
+    note.notations
+        .iter()
+        .flat_map(|notations| &notations.fermata)
+        .map(|fermata| match fermata.shape {
+            FermataShape::DoubleAngled => 1.25,
+            FermataShape::Angled | FermataShape::HalfCurve => 1.5,
+            FermataShape::Normal | FermataShape::Curlew => 2.0,
+            FermataShape::Square | FermataShape::DoubleDot => 3.0,
+            FermataShape::DoubleSquare => 4.0,
+        })
+        .reduce(f64::max)
 }
 
 /// Returns `(start, stop)`, a note in the middle of a tie chain has both
@@ -976,6 +1052,53 @@ mod tests {
             "direction_offset_musescore_compat",
             parse(&src, true).unwrap()
         );
+    }
+
+    #[test]
+    fn fermata() {
+        let src = xml!(
+        <score-partwise version="4.0">
+          <part-list>
+            <score-part id="P1">
+              <part-name>Piano</part-name>
+            </score-part>
+          </part-list>
+          <part id="P1">
+            <measure number="1">
+              <attributes>
+                <divisions>1</divisions>
+              </attributes>
+              <direction>
+                <direction-type><words>Adagio</words></direction-type>
+                <sound tempo="60"/>
+              </direction>
+              <note>
+                <pitch><step>C</step><octave>4</octave></pitch>
+                <duration>2</duration>
+                <notations><fermata>normal</fermata></notations>
+              </note>
+              <note>
+                <rest/>
+                <duration>1</duration>
+                <notations><fermata>angled</fermata></notations>
+              </note>
+              <note>
+                <pitch><step>D</step><octave>4</octave></pitch>
+                <duration>1</duration>
+              </note>
+              <note>
+                <chord/>
+                <pitch><step>F</step><octave>4</octave></pitch>
+                <duration>1</duration>
+                <notations><fermata>square</fermata></notations>
+              </note>
+            </measure>
+          </part>
+        </score-partwise>
+        );
+
+        let src = simple_xml_format(src);
+        insta::assert_debug_snapshot!(parse(&src, false).unwrap());
     }
 
     #[test]
