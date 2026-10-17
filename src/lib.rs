@@ -4,13 +4,11 @@ mod chord_symbol;
 mod musicxml;
 
 use std::{
-    borrow::Cow,
     collections::{BTreeMap, BTreeSet},
     time::Duration,
 };
 
 use musicxml::MeasureItem;
-use quick_xml::events::{BytesStart, Event};
 
 mod parser;
 
@@ -493,145 +491,93 @@ fn midi_note_number(step: musicxml::Step, octave: u8, alter: f64) -> u8 {
 
 type Reader<'a> = quick_xml::reader::Reader<&'a [u8]>;
 
-#[derive(Debug)]
-enum DocumentElement<'a> {
-    Child(Document<'a>),
-    Text(Cow<'a, str>),
-}
-
-#[derive(Debug)]
-struct Document<'a> {
-    start: BytesStart<'a>,
-    events: Vec<DocumentElement<'a>>,
-}
-
-impl<'a> Document<'a> {
-    fn new(start: BytesStart<'a>) -> Self {
-        Self {
-            start,
-            events: Vec::new(),
-        }
-    }
-
-    fn read(reader: &mut Reader<'a>, start: BytesStart<'a>) -> quick_xml::Result<Self> {
-        let mut document = Self::new(start);
-
-        loop {
-            let event = reader.read_event()?;
-            match event {
-                Event::Start(start) => {
-                    let child = Document::read(reader, start)?;
-                    document.events.push(DocumentElement::Child(child));
-                    continue;
-                }
-                Event::End(end) => {
-                    break;
-                }
-                Event::Empty(_) => unreachable!(),
-                Event::Text(text) => {
-                    let text = text.decode().unwrap();
-                    document.events.push(DocumentElement::Text(text));
-                    continue;
-                }
-                Event::CData(bytes_cdata) => todo!(),
-                Event::Comment(bytes_text) => todo!(),
-                Event::Decl(bytes_decl) => todo!(),
-                Event::PI(bytes_pi) => todo!(),
-                Event::DocType(bytes_text) => todo!(),
-                Event::GeneralRef(bytes_ref) => todo!(),
-                Event::Eof => break,
-            }
-        }
-
-        Ok(document)
-    }
-}
-
-fn simple_xml_format(src: &str) -> String {
-    let mut reader = Reader::from_str(src);
-    reader.config_mut().trim_text(true);
-
-    let mut out = String::new();
-    let mut depth = 0usize;
-
-    loop {
-        match reader.read_event() {
-            Ok(Event::Start(e)) => {
-                out.push_str(&"  ".repeat(depth));
-                out.push('<');
-                out.push_str(std::str::from_utf8(e.name().as_ref()).unwrap());
-                for attr in e.attributes().flatten() {
-                    out.push(' ');
-                    out.push_str(std::str::from_utf8(attr.key.as_ref()).unwrap());
-                    out.push_str("=\"");
-                    out.push_str(&String::from_utf8_lossy(&attr.value));
-                    out.push('"');
-                }
-                out.push_str(">\n");
-                depth += 1;
-            }
-
-            Ok(Event::End(e)) => {
-                depth -= 1;
-                out.push_str(&"  ".repeat(depth));
-                out.push_str("</");
-                out.push_str(std::str::from_utf8(e.name().as_ref()).unwrap());
-                out.push_str(">\n");
-            }
-
-            Ok(Event::Empty(e)) => {
-                out.push_str(&"  ".repeat(depth));
-                out.push('<');
-                out.push_str(std::str::from_utf8(e.name().as_ref()).unwrap());
-                for attr in e.attributes().flatten() {
-                    out.push(' ');
-                    out.push_str(std::str::from_utf8(attr.key.as_ref()).unwrap());
-                    out.push_str("=\"");
-                    out.push_str(&String::from_utf8_lossy(&attr.value));
-                    out.push('"');
-                }
-                out.push_str("/>\n");
-            }
-
-            Ok(Event::Text(e)) => {
-                let text = e.decode().unwrap();
-                if !text.trim().is_empty() {
-                    out.push_str(&"  ".repeat(depth));
-                    out.push_str(text.trim());
-                    out.push('\n');
-                }
-            }
-
-            Ok(Event::Comment(e)) => {
-                out.push_str(&"  ".repeat(depth));
-                out.push_str("<!--");
-                out.push_str(&String::from_utf8_lossy(&e));
-                out.push_str("-->\n");
-            }
-
-            Ok(Event::Decl(e)) => {
-                out.push_str(&"  ".repeat(depth));
-                out.push_str(&String::from_utf8_lossy(&e));
-                out.push('\n');
-            }
-
-            Ok(Event::Eof) => break,
-
-            Err(_) => return src.to_owned(),
-            _ => {}
-        }
-    }
-
-    out
-}
-
 #[cfg(test)]
 mod tests {
+    use quick_xml::events::Event;
+
     use super::*;
+
+    fn simple_xml_format(src: &str) -> String {
+        let mut reader = Reader::from_str(src);
+        reader.config_mut().trim_text(true);
+
+        let mut out = String::new();
+        let mut depth = 0usize;
+
+        loop {
+            match reader.read_event() {
+                Ok(Event::Start(e)) => {
+                    out.push_str(&"  ".repeat(depth));
+                    out.push('<');
+                    out.push_str(std::str::from_utf8(e.name().as_ref()).unwrap());
+                    for attr in e.attributes().flatten() {
+                        out.push(' ');
+                        out.push_str(std::str::from_utf8(attr.key.as_ref()).unwrap());
+                        out.push_str("=\"");
+                        out.push_str(&String::from_utf8_lossy(&attr.value));
+                        out.push('"');
+                    }
+                    out.push_str(">\n");
+                    depth += 1;
+                }
+
+                Ok(Event::End(e)) => {
+                    depth -= 1;
+                    out.push_str(&"  ".repeat(depth));
+                    out.push_str("</");
+                    out.push_str(std::str::from_utf8(e.name().as_ref()).unwrap());
+                    out.push_str(">\n");
+                }
+
+                Ok(Event::Empty(e)) => {
+                    out.push_str(&"  ".repeat(depth));
+                    out.push('<');
+                    out.push_str(std::str::from_utf8(e.name().as_ref()).unwrap());
+                    for attr in e.attributes().flatten() {
+                        out.push(' ');
+                        out.push_str(std::str::from_utf8(attr.key.as_ref()).unwrap());
+                        out.push_str("=\"");
+                        out.push_str(&String::from_utf8_lossy(&attr.value));
+                        out.push('"');
+                    }
+                    out.push_str("/>\n");
+                }
+
+                Ok(Event::Text(e)) => {
+                    let text = e.decode().unwrap();
+                    if !text.trim().is_empty() {
+                        out.push_str(&"  ".repeat(depth));
+                        out.push_str(text.trim());
+                        out.push('\n');
+                    }
+                }
+
+                Ok(Event::Comment(e)) => {
+                    out.push_str(&"  ".repeat(depth));
+                    out.push_str("<!--");
+                    out.push_str(&String::from_utf8_lossy(&e));
+                    out.push_str("-->\n");
+                }
+
+                Ok(Event::Decl(e)) => {
+                    out.push_str(&"  ".repeat(depth));
+                    out.push_str(&String::from_utf8_lossy(&e));
+                    out.push('\n');
+                }
+
+                Ok(Event::Eof) => break,
+
+                Err(_) => return src.to_owned(),
+                _ => {}
+            }
+        }
+
+        out
+    }
 
     macro_rules! xml {
         ( $($t:tt)* ) => {
-            stringify!($($t)*)
+            simple_xml_format(stringify!($($t)*))
         };
     }
 
@@ -723,7 +669,6 @@ mod tests {
             </score-partwise>
         );
 
-        let src = simple_xml_format(src);
         let midi = parse(&src, false).unwrap();
         insta::assert_debug_snapshot!(midi);
     }
@@ -854,7 +799,7 @@ mod tests {
         </score-partwise>
         );
 
-        let midi = parse(src, false).unwrap();
+        let midi = parse(&src, false).unwrap();
         insta::assert_debug_snapshot!(midi);
     }
 
@@ -928,7 +873,6 @@ mod tests {
         </score-partwise>
         );
 
-        let src = simple_xml_format(src);
         let midi = parse(&src, false).unwrap();
         insta::assert_debug_snapshot!(midi);
     }
@@ -984,7 +928,6 @@ mod tests {
         </score-partwise>
         );
 
-        let src = simple_xml_format(src);
         insta::assert_debug_snapshot!(parse(&src, false).unwrap());
         insta::assert_debug_snapshot!(
             "direction_offset_musescore_compat",
@@ -1035,7 +978,6 @@ mod tests {
         </score-partwise>
         );
 
-        let src = simple_xml_format(src);
         insta::assert_debug_snapshot!(parse(&src, false).unwrap());
     }
 
@@ -1099,7 +1041,6 @@ mod tests {
         </score-partwise>
         );
 
-        let src = simple_xml_format(src);
         insta::assert_debug_snapshot!(parse(&src, false).unwrap());
         insta::assert_debug_snapshot!("harmony_musescore_compat", parse(&src, true).unwrap());
     }
@@ -1143,7 +1084,6 @@ mod tests {
         </score-partwise>
         );
 
-        let src = simple_xml_format(src);
         let midi = parse(&src, false).unwrap();
         insta::assert_debug_snapshot!(midi);
     }
@@ -1151,7 +1091,7 @@ mod tests {
     /// Grace notes are skipped without moving other notes, cue notes are silent but take time
     #[test]
     fn grace_cue() {
-        let src = r#"
+        let src = xml!(
         <score-partwise version="4.0">
           <part-list>
             <score-part id="P1"><part-name>Piano</part-name></score-part>
@@ -1196,8 +1136,8 @@ mod tests {
             </measure>
           </part>
         </score-partwise>
-        "#;
+        );
 
-        insta::assert_debug_snapshot!(parse(src, false).unwrap());
+        insta::assert_debug_snapshot!(parse(&src, false).unwrap());
     }
 }
