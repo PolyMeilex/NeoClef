@@ -1,6 +1,6 @@
 ---
-source: src/main.rs
-assertion_line: 853
+source: src/lib.rs
+assertion_line: 883
 expression: midi
 ---
 Smf {
@@ -3084,6 +3084,18 @@ Smf {
                 delta: u28(
                     240,
                 ),
+                kind: Meta(
+                    Tempo(
+                        u24(
+                            652174,
+                        ),
+                    ),
+                ),
+            },
+            TrackEvent {
+                delta: u28(
+                    0,
+                ),
                 kind: Midi {
                     channel: u4(
                         0,
@@ -3133,18 +3145,6 @@ Smf {
                         ),
                     },
                 },
-            },
-            TrackEvent {
-                delta: u28(
-                    0,
-                ),
-                kind: Meta(
-                    Tempo(
-                        u24(
-                            652174,
-                        ),
-                    ),
-                ),
             },
             TrackEvent {
                 delta: u28(
@@ -19188,6 +19188,18 @@ Smf {
                 delta: u28(
                     60,
                 ),
+                kind: Meta(
+                    Tempo(
+                        u24(
+                            631579,
+                        ),
+                    ),
+                ),
+            },
+            TrackEvent {
+                delta: u28(
+                    0,
+                ),
                 kind: Midi {
                     channel: u4(
                         0,
@@ -19201,18 +19213,6 @@ Smf {
                         ),
                     },
                 },
-            },
-            TrackEvent {
-                delta: u28(
-                    0,
-                ),
-                kind: Meta(
-                    Tempo(
-                        u24(
-                            631579,
-                        ),
-                    ),
-                ),
             },
             TrackEvent {
                 delta: u28(
@@ -21522,6 +21522,18 @@ Smf {
                 delta: u28(
                     240,
                 ),
+                kind: Meta(
+                    Tempo(
+                        u24(
+                            600000,
+                        ),
+                    ),
+                ),
+            },
+            TrackEvent {
+                delta: u28(
+                    0,
+                ),
                 kind: Midi {
                     channel: u4(
                         0,
@@ -21553,18 +21565,6 @@ Smf {
                         ),
                     },
                 },
-            },
-            TrackEvent {
-                delta: u28(
-                    0,
-                ),
-                kind: Meta(
-                    Tempo(
-                        u24(
-                            600000,
-                        ),
-                    ),
-                ),
             },
             TrackEvent {
                 delta: u28(
@@ -21750,6 +21750,18 @@ Smf {
                 delta: u28(
                     240,
                 ),
+                kind: Meta(
+                    Tempo(
+                        u24(
+                            631579,
+                        ),
+                    ),
+                ),
+            },
+            TrackEvent {
+                delta: u28(
+                    0,
+                ),
                 kind: Midi {
                     channel: u4(
                         0,
@@ -21781,18 +21793,6 @@ Smf {
                         ),
                     },
                 },
-            },
-            TrackEvent {
-                delta: u28(
-                    0,
-                ),
-                kind: Meta(
-                    Tempo(
-                        u24(
-                            631579,
-                        ),
-                    ),
-                ),
             },
             TrackEvent {
                 delta: u28(
@@ -35970,6 +35970,18 @@ Smf {
                 delta: u28(
                     360,
                 ),
+                kind: Meta(
+                    Tempo(
+                        u24(
+                            705882,
+                        ),
+                    ),
+                ),
+            },
+            TrackEvent {
+                delta: u28(
+                    0,
+                ),
                 kind: Midi {
                     channel: u4(
                         0,
@@ -36001,18 +36013,6 @@ Smf {
                         ),
                     },
                 },
-            },
-            TrackEvent {
-                delta: u28(
-                    0,
-                ),
-                kind: Meta(
-                    Tempo(
-                        u24(
-                            705882,
-                        ),
-                    ),
-                ),
             },
             TrackEvent {
                 delta: u28(
@@ -36324,6 +36324,18 @@ Smf {
                 delta: u28(
                     480,
                 ),
+                kind: Meta(
+                    Tempo(
+                        u24(
+                            1200000,
+                        ),
+                    ),
+                ),
+            },
+            TrackEvent {
+                delta: u28(
+                    0,
+                ),
                 kind: Midi {
                     channel: u4(
                         0,
@@ -36337,18 +36349,6 @@ Smf {
                         ),
                     },
                 },
-            },
-            TrackEvent {
-                delta: u28(
-                    0,
-                ),
-                kind: Meta(
-                    Tempo(
-                        u24(
-                            1200000,
-                        ),
-                    ),
-                ),
             },
             TrackEvent {
                 delta: u28(
