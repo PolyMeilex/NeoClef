@@ -4,8 +4,21 @@ use super::Reader;
 use quick_xml::events::{BytesStart, Event};
 
 #[derive(Debug, thiserror::Error, miette::Diagnostic)]
+#[error(transparent)]
+#[diagnostic(transparent)]
+pub struct Error(Box<ErrorInner>);
+
+impl std::ops::Deref for Error {
+    type Target = ErrorInner;
+
+    fn deref(&self) -> &ErrorInner {
+        &self.0
+    }
+}
+
+#[derive(Debug, thiserror::Error, miette::Diagnostic)]
 #[error("{kind}")]
-pub struct Error {
+pub struct ErrorInner {
     pub kind: ErrorKind,
     #[label("here")]
     pub span: miette::SourceSpan,
@@ -55,11 +68,11 @@ impl<'a> XmlStream<'a> {
     pub fn error(&self, kind: ErrorKind) -> Error {
         let start = self.last_span.start;
         let len = self.last_span.end - start;
-        Error {
+        Error(Box::new(ErrorInner {
             kind,
             span: (start, len).into(),
             src: miette::NamedSource::new(self.name.clone(), self.src.clone()),
-        }
+        }))
     }
 
     /// Reads the next raw event straight from the underlying reader, recording its span.
