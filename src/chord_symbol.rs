@@ -1,7 +1,7 @@
 use crate::musicxml::{DegreeType, Harmony, HarmonyChordRoot, HarmonyKind, Step};
 
 /// ret: MIDI keys of a chord symbol
-pub fn realize(harmony: &Harmony) -> Option<Vec<u8>> {
+pub fn resolve(harmony: &Harmony) -> Option<Vec<u8>> {
     // Like MuseScore, play only the first of stacked chords (V of II), and only if all have roots
     let mut roots = harmony.chords.iter().map(|chord| match &chord.root {
         HarmonyChordRoot::Root(root)
@@ -141,7 +141,7 @@ mod tests {
     use crate::parser::XmlStream;
 
     /// ret: keys of a chord with a single degree
-    fn realize_degree(
+    fn resolve_degree(
         root: &str,
         kind: &str,
         value: u32,
@@ -161,14 +161,14 @@ mod tests {
         );
         let mut stream = XmlStream::new("test", &src);
         let harmony = stream.required::<Harmony>(b"harmony").unwrap();
-        realize(&harmony).unwrap()
+        resolve(&harmony).unwrap()
     }
 
     #[test]
     fn sus4_add_seventh_is_dominant() {
         // G7sus4: G, C, D, F
         assert_eq!(
-            realize_degree("G", "suspended-fourth", 7, 0, "add"),
+            resolve_degree("G", "suspended-fourth", 7, 0, "add"),
             [43, 60, 62, 65, 67]
         );
     }
@@ -177,7 +177,7 @@ mod tests {
     fn add_is_relative_to_dominant() {
         // C7: C, E, G, Bb
         assert_eq!(
-            realize_degree("C", "major", 7, 0, "add"),
+            resolve_degree("C", "major", 7, 0, "add"),
             [36, 60, 64, 67, 70]
         );
     }
@@ -186,7 +186,7 @@ mod tests {
     fn alter_is_relative_to_kind() {
         // Cdim(#5): C, Eb, G
         assert_eq!(
-            realize_degree("C", "diminished", 5, 1, "alter"),
+            resolve_degree("C", "diminished", 5, 1, "alter"),
             [36, 60, 63, 67]
         );
     }
@@ -195,7 +195,7 @@ mod tests {
     fn alter_missing_degree_is_relative_to_dominant() {
         // C(b7) where the chord has no 7th: C, E, G, A
         assert_eq!(
-            realize_degree("C", "major", 7, -1, "alter"),
+            resolve_degree("C", "major", 7, -1, "alter"),
             [36, 60, 64, 67, 69]
         );
     }

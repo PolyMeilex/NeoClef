@@ -99,7 +99,7 @@ struct RawScore {
     fermatas: BTreeMap<Tick, f64>,
     /// Note and rest start ticks
     onsets: BTreeSet<Tick>,
-    /// Realized chord symbols, by staff and start
+    /// Resolved chord symbols, by staff and start
     chord_symbols: BTreeMap<u8, BTreeMap<Tick, Vec<u8>>>,
     /// Last note end tick
     end: Tick,
@@ -199,7 +199,7 @@ fn collect(v: &musicxml::ScorePartwise, musescore_compat: bool) -> RawScore {
                 MeasureItem::Print(_) => {}
                 MeasureItem::Barline(_) => {}
                 MeasureItem::Harmony(harmony) => {
-                    if let Some(keys) = chord_symbol::realize(harmony) {
+                    if let Some(keys) = chord_symbol::resolve(harmony) {
                         let offset = harmony
                             .offset
                             .as_ref()
