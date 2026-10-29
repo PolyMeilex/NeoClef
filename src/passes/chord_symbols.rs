@@ -1,7 +1,49 @@
-use crate::musicxml::{DegreeType, Harmony, HarmonyChordRoot, HarmonyKind, Step};
+use std::collections::BTreeMap;
+
+use crate::{
+    parsing::musicxml::{DegreeType, Harmony, HarmonyChordRoot, HarmonyKind, Step},
+    passes::{Control, DEFAULT_VELOCITY, MidiNote, Performance, Tick, TieFlags},
+};
+
+const HARMONY_CHANNEL: u8 = 1;
+
+pub fn chord_symbols(perf: &Performance, notes: &mut Vec<MidiNote>) {
+    let mut by_staff: BTreeMap<u8, BTreeMap<Tick, Vec<u8>>> = BTreeMap::new();
+    for (tick, control) in &perf.controls {
+        if let Control::ChordSymbol { staff, keys } = control {
+            by_staff
+                .entry(*staff)
+                .or_default()
+                .entry(*tick)
+                .or_default()
+                .extend(keys);
+        }
+    }
+
+    for (staff, symbols) in by_staff {
+        let mut symbols = symbols.into_iter().peekable();
+        while let Some((start, keys)) = symbols.next() {
+            let next = symbols.peek().map_or(perf.end, |(next, _)| *next);
+
+            for key in keys {
+                notes.push(MidiNote {
+                    id: None,
+                    on: start,
+                    off: next.max(start),
+                    key,
+                    vel: DEFAULT_VELOCITY,
+                    off_vel: 0,
+                    tie: TieFlags::default(),
+                    staff,
+                    channel: HARMONY_CHANNEL,
+                });
+            }
+        }
+    }
+}
 
 /// ret: MIDI keys of a chord symbol
-pub fn resolve(harmony: &Harmony) -> Option<Vec<u8>> {
+pub(super) fn resolve(harmony: &Harmony) -> Option<Vec<u8>> {
     // Like MuseScore, play only the first of stacked chords (V of II), and only if all have roots
     let mut roots = harmony.chords.iter().map(|chord| match &chord.root {
         HarmonyChordRoot::Root(root)
@@ -138,7 +180,47 @@ fn kind_tones(kind: HarmonyKind) -> &'static [(u8, i32)] {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::parser::XmlStream;
+    use crate::parsing::parser::XmlStream;
+
+    fn chord(staff: u8, keys: &[u8]) -> Control {
+        Control::ChordSymbol {
+            staff,
+            keys: keys.to_vec(),
+        }
+    }
+
+    #[test]
+    fn lasts_until_the_next_on_the_staff_or_the_end() {
+        let perf = Performance {
+            events: Vec::new(),
+            controls: vec![
+                (0, chord(1, &[36])),
+                (0, chord(1, &[60])),
+                (480, chord(2, &[38])),
+                (960, chord(1, &[41])),
+                (1200, Control::Tempo(60.0)),
+            ],
+            tempo: BTreeMap::new(),
+            end: 1440,
+        };
+
+        let mut notes = Vec::new();
+        chord_symbols(&perf, &mut notes);
+
+        let notes: Vec<_> = notes
+            .iter()
+            .map(|note| (note.staff, note.on, note.off, note.key))
+            .collect();
+        assert_eq!(
+            notes,
+            [
+                (1, 0, 960, 36),
+                (1, 0, 960, 60),
+                (1, 960, 1440, 41),
+                (2, 480, 1440, 38),
+            ]
+        );
+    }
 
     /// ret: keys of a chord with a single degree
     fn resolve_degree(

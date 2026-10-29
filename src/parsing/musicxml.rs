@@ -2113,7 +2113,7 @@ pub enum NoteKindStatePitchKind {
 }
 
 impl<'a> ParseContentFlat<'a> for NoteKindStatePitchKind {
-    fn parse(stream: &mut XmlStream<'a>) -> Result<Self, crate::parser::Error> {
+    fn parse(stream: &mut XmlStream<'a>) -> Result<Self, crate::parsing::parser::Error> {
         let kind = match stream.peek_tag()? {
             Some(b"pitch") => Self::Pitch(stream.required(b"pitch")?),
             Some(b"unpitched") => Self::Unpitched(stream.required(b"unpitched")?),
@@ -2295,7 +2295,7 @@ impl<'a> ParseContent<'a> for Note {
         stream: &mut XmlStream<'a>,
         tag: &[u8],
         start: &BytesStart<'a>,
-    ) -> Result<Self, crate::parser::Error> {
+    ) -> Result<Self, crate::parsing::parser::Error> {
         let mut dynamics: Option<NonNegativeDecimal> = None;
         let mut end_dynamics: Option<NonNegativeDecimal> = None;
 
@@ -3202,7 +3202,7 @@ impl<'a> ParseContent<'a> for Pitch {
         stream: &mut XmlStream<'a>,
         tag: &[u8],
         start: &BytesStart<'a>,
-    ) -> std::result::Result<Self, crate::parser::Error> {
+    ) -> std::result::Result<Self, crate::parsing::parser::Error> {
         let step = stream.required(b"step")?;
         let alter = stream.optional(b"alter")?;
         let octave = stream.required(b"octave")?;
@@ -3259,7 +3259,7 @@ impl<'a> ParseContent<'a> for Rest {
         stream: &mut XmlStream<'a>,
         tag: &[u8],
         start: &BytesStart<'a>,
-    ) -> Result<Self, crate::parser::Error> {
+    ) -> Result<Self, crate::parsing::parser::Error> {
         let mut measure = false;
 
         for attr in start.attributes().filter_map(|r| r.ok()) {
@@ -3282,7 +3282,7 @@ impl<'a> ParseContent<'a> for Rest {
 
 pub use primitive::*;
 
-use crate::parser::{self, ParseContent, ParseContentFlat, XmlStream};
+use crate::parsing::parser::{self, ParseContent, ParseContentFlat, XmlStream};
 mod primitive {
     #![allow(unused)]
 
@@ -3393,24 +3393,25 @@ mod primitive {
             stream: &mut XmlStream<'a>,
             tag: &[u8],
             start: &BytesStart<'a>,
-        ) -> Result<Self, crate::parser::Error> {
+        ) -> Result<Self, crate::parsing::parser::Error> {
             let str = Cow::<str>::parse(stream, tag, start)?;
 
-            let step =
-                match str.trim() {
-                    "A" => Step::A,
-                    "B" => Step::B,
-                    "C" => Step::C,
-                    "D" => Step::D,
-                    "E" => Step::E,
-                    "F" => Step::F,
-                    "G" => Step::G,
-                    other => {
-                        return Err(stream.error(crate::parser::ErrorKind::UnexpectedValue(
-                            format!("Unexpected step value: {other:?}"),
-                        )));
-                    }
-                };
+            let step = match str.trim() {
+                "A" => Step::A,
+                "B" => Step::B,
+                "C" => Step::C,
+                "D" => Step::D,
+                "E" => Step::E,
+                "F" => Step::F,
+                "G" => Step::G,
+                other => {
+                    return Err(
+                        stream.error(crate::parsing::parser::ErrorKind::UnexpectedValue(format!(
+                            "Unexpected step value: {other:?}"
+                        ))),
+                    );
+                }
+            };
 
             Ok(step)
         }

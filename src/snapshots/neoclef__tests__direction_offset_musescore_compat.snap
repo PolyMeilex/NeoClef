@@ -1,6 +1,6 @@
 ---
-source: src/main.rs
-assertion_line: 969
+source: src/lib.rs
+assertion_line: 508
 expression: "parse(&src, true).unwrap()"
 ---
 Smf {
@@ -144,6 +144,18 @@ Smf {
                 delta: u28(
                     960,
                 ),
+                kind: Meta(
+                    Tempo(
+                        u24(
+                            750000,
+                        ),
+                    ),
+                ),
+            },
+            TrackEvent {
+                delta: u28(
+                    0,
+                ),
                 kind: Midi {
                     channel: u4(
                         0,
@@ -178,19 +190,7 @@ Smf {
             },
             TrackEvent {
                 delta: u28(
-                    240,
-                ),
-                kind: Meta(
-                    Tempo(
-                        u24(
-                            750000,
-                        ),
-                    ),
-                ),
-            },
-            TrackEvent {
-                delta: u28(
-                    720,
+                    960,
                 ),
                 kind: Midi {
                     channel: u4(

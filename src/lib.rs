@@ -1,40 +1,16 @@
 #![allow(clippy::single_match, clippy::let_unit_value)]
 
-mod chord_symbol;
-mod musicxml;
-
-use std::{
-    collections::{BTreeMap, BTreeSet},
-    time::Duration,
-};
-
-use musicxml::MeasureItem;
-
-mod parser;
-
-pub use parser::Error as ParseError;
+mod parsing;
+mod passes;
 
 #[cfg(test)]
 mod test_support;
 
-const TICKS_PER_QUARTER_NOTE: u16 = 480;
-const TICKS_PER_QUARTER_NOTE_F64: f64 = TICKS_PER_QUARTER_NOTE as f64;
+use parsing::{musicxml, parser};
+use passes::Policy;
 
-const SECOND: Duration = Duration::from_secs(1);
+pub use parser::Error as ParseError;
 
-const DEFAULT_BPM: u32 = 120;
-
-const DEFAULT_VELOCITY: u8 = 80;
-const HARMONY_CHANNEL: u8 = 1;
-
-// 1s = 1_000_000µ
-// 1m = 60_000_000µ
-
-// BPM = 60_000_000 / MicrosecondsPerQuarterNote
-// BPM * MicrosecondsPerQuarterNote = 60_000_000
-// MicrosecondsPerQuarterNote = 60_000_000 / BPM
-
-/// Error returned by [`musicxml_to_smf`]
 #[derive(Debug, thiserror::Error, miette::Diagnostic)]
 pub enum Error {
     #[error(transparent)]
@@ -45,457 +21,42 @@ pub enum Error {
 }
 
 pub fn parse(src: &str, musescore_compat: bool) -> Result<midly::Smf<'static>, Error> {
-    let mut stream = parser::XmlStream::new("score.musicxml", src);
-    let v: musicxml::ScorePartwise = stream.required(b"score-partwise")?;
-    log::debug!("{v:#?}");
+    let score: musicxml::ScorePartwise =
+        parser::XmlStream::new("score.musicxml", src).required(b"score-partwise")?;
+    log::debug!("{score:#?}");
 
-    if v.part.len() != 1 {
-        return Err(Error::Unsupported(format!(
+    let part = single_part(&score)?;
+    let policy = Policy::new(musescore_compat);
+
+    let laid = passes::layout(part, &policy);
+    let order = passes::playback_order(&laid);
+
+    let mut perf = passes::unroll(&laid, &order);
+
+    passes::tempo(&mut perf);
+    passes::fermata(&mut perf);
+    let mut notes = passes::sounding_notes(&perf);
+    passes::chord_symbols(&perf, &mut notes);
+
+    Ok(passes::encode(&perf.tempo, &notes))
+}
+
+fn single_part(score: &musicxml::ScorePartwise) -> Result<&musicxml::Part, Error> {
+    match score.part.as_slice() {
+        [part] => Ok(part),
+        parts => Err(Error::Unsupported(format!(
             "expected exactly one part, found {}",
-            v.part.len()
-        )));
-    }
-
-    let timeline = timeline(&v, musescore_compat);
-    Ok(to_smf(&timeline))
-}
-
-type Tick = usize;
-
-#[derive(Debug, Clone)]
-struct TimelineNote {
-    start: Tick,
-    end: Tick,
-    key: u8,
-    velocity: u8,
-    off_velocity: u8,
-    tie_start: bool,
-    tie_stop: bool,
-    staff: u8,
-    channel: u8,
-}
-
-#[derive(Debug)]
-struct Timeline {
-    notes: Vec<TimelineNote>,
-    /// Beats per second, from the tick on
-    tempos: BTreeMap<Tick, f64>,
-    /// The highest staff of the notes, one track each
-    staves: u8,
-}
-
-impl Timeline {
-    fn push(&mut self, note: TimelineNote) {
-        self.staves = self.staves.max(note.staff);
-        self.notes.push(note);
+            parts.len()
+        ))),
     }
 }
-
-struct RawScore {
-    timeline: Timeline,
-    /// The longest fermata at each tick
-    fermatas: BTreeMap<Tick, f64>,
-    /// Note and rest start ticks
-    onsets: BTreeSet<Tick>,
-    /// Resolved chord symbols, by staff and start
-    chord_symbols: BTreeMap<u8, BTreeMap<Tick, Vec<u8>>>,
-    /// Last note end tick
-    end: Tick,
-}
-
-fn timeline(v: &musicxml::ScorePartwise, musescore_compat: bool) -> Timeline {
-    resolve(collect(v, musescore_compat))
-}
-
-fn collect(v: &musicxml::ScorePartwise, musescore_compat: bool) -> RawScore {
-    assert_eq!(v.part.len(), 1);
-
-    let measures = v.part.iter().flat_map(|part| &part.measure);
-
-    let mut divisions = 1.0;
-    let mut position = 0.0f64;
-    let mut staves = 1;
-    // (start, length) of the last note or rest without `<chord/>`, chord notes share it
-    let mut chord = (0.0f64, 0.0f64);
-
-    let mut collected = RawScore {
-        timeline: Timeline {
-            notes: Vec::new(),
-            tempos: BTreeMap::new(),
-            staves: 1,
-        },
-        fermatas: BTreeMap::new(),
-        onsets: BTreeSet::new(),
-        chord_symbols: BTreeMap::new(),
-        end: 0,
-    };
-
-    for measure in measures {
-        for item in &measure.content {
-            log::trace!("{item:#?}");
-
-            match item {
-                MeasureItem::Attributes(attributes) => {
-                    if let Some(d) = attributes.divisions.as_ref() {
-                        divisions = *d;
-                    }
-                    if let Some(s) = attributes.staves {
-                        staves = s;
-                    }
-                }
-                MeasureItem::Note(note) => {
-                    let Some(msg) = full_note(note) else {
-                        // Grace notes take no time, and aren't played, cause I don't care, it brings too much complexity
-                        continue;
-                    };
-
-                    if !msg.chord {
-                        chord = (position, msg.duration / divisions);
-                        collected.onsets.insert(to_ticks(position));
-                        match msg.kind {
-                            musicxml::NoteKindStatePitchKind::Pitch(_)
-                            | musicxml::NoteKindStatePitchKind::Rest(_) => position += chord.1,
-                            _ => {}
-                        }
-                    }
-                    let (start, quarters) = chord;
-
-                    if let Some(stretch) = fermata_stretch(note) {
-                        let longest = collected.fermatas.entry(to_ticks(start)).or_insert(stretch);
-                        *longest = longest.max(stretch);
-                    }
-
-                    if let musicxml::NoteKindStatePitchKind::Pitch(pitch) = msg.kind
-                        && msg.play
-                    {
-                        let (tie_start, tie_stop) = tie_kinds(msg.tie);
-                        let end = to_ticks(start + quarters);
-                        collected.end = collected.end.max(end);
-                        collected.timeline.push(TimelineNote {
-                            start: to_ticks(start),
-                            end,
-                            key: midi_note_number(
-                                pitch.step,
-                                pitch.octave,
-                                pitch.alter.unwrap_or(0.0),
-                            ),
-                            velocity: note_on_velocity(note),
-                            off_velocity: note_off_velocity(note),
-                            tie_start,
-                            tie_stop,
-                            staff: note.staff.unwrap_or(1),
-                            channel: 0,
-                        });
-                    }
-                }
-                MeasureItem::Backup(backup) => {
-                    position = (position - backup.duration / divisions).max(0.0);
-                }
-                MeasureItem::Forward(forward) => {
-                    position += forward.duration / divisions;
-                }
-                MeasureItem::Print(_) => {}
-                MeasureItem::Barline(_) => {}
-                MeasureItem::Harmony(harmony) => {
-                    if let Some(keys) = chord_symbol::resolve(harmony) {
-                        let offset = harmony
-                            .offset
-                            .as_ref()
-                            // MuseScore ignores `sound`, like for directions
-                            .filter(|offset| offset.sound || musescore_compat)
-                            .map(|offset| offset.value / divisions)
-                            .unwrap_or(0.0);
-
-                        let staff = harmony
-                            .staff
-                            .filter(|staff| (1..=staves).contains(&u32::from(*staff)))
-                            .unwrap_or(1);
-
-                        collected
-                            .chord_symbols
-                            .entry(staff)
-                            .or_default()
-                            .entry(to_ticks((position + offset).max(0.0)))
-                            .or_default()
-                            .extend(keys);
-                    }
-                }
-                MeasureItem::Direction(direction) => {
-                    if let Some(sound) = direction.sound.as_ref()
-                        && let Some(tempo) = sound.tempo.as_ref()
-                    {
-                        let offset = sound
-                            .offset
-                            .as_ref()
-                            .or(direction
-                                .offset
-                                .as_ref()
-                                // Why does MuseScore ignore this? Spec seems to suggest I should filter here
-                                .filter(|offset| offset.sound || musescore_compat))
-                            .map(|offset| offset.value / divisions)
-                            .unwrap_or(0.0);
-
-                        collected.timeline.tempos.insert(
-                            to_ticks((position + offset).max(0.0)),
-                            round_tempo(*tempo / 60.0),
-                        );
-                    }
-                }
-            }
-        }
-    }
-
-    collected.end = collected.end.max(to_ticks(position));
-    collected
-}
-
-fn resolve(raw: RawScore) -> Timeline {
-    let RawScore {
-        mut timeline,
-        fermatas,
-        onsets,
-        chord_symbols,
-        end,
-    } = raw;
-
-    // A fermata divides the tempo by its time stretch, and the tempo goes back
-    // just before the next note or rest
-    for (start, stretch) in fermatas {
-        let bps = timeline
-            .tempos
-            .range(..=start)
-            .next_back()
-            .map_or(f64::from(DEFAULT_BPM) / 60.0, |(_, bps)| *bps);
-        let stop = onsets
-            .range(start + 1..)
-            .next()
-            .map_or(end, |onset| (*onset).min(end));
-
-        timeline.tempos.insert(start, round_tempo(bps / stretch));
-        timeline.tempos.insert(stop.saturating_sub(1), bps);
-    }
-
-    // if no tempo, 120 BPM default
-    let first = timeline.tempos.entry(0).or_insert(0.0);
-    if *first <= 0.0 {
-        *first = f64::from(DEFAULT_BPM) / 60.0;
-    }
-
-    // Like MuseScore, chord symbols last until the next one on the same staff, or the end
-    for (staff, symbols) in chord_symbols {
-        let mut symbols = symbols.into_iter().peekable();
-        while let Some((start, keys)) = symbols.next() {
-            let next = symbols.peek().map_or(end, |(next, _)| *next);
-
-            for key in keys {
-                timeline.push(TimelineNote {
-                    start,
-                    end: next.max(start),
-                    key,
-                    velocity: DEFAULT_VELOCITY,
-                    off_velocity: 0,
-                    tie_start: false,
-                    tie_stop: false,
-                    staff,
-                    channel: HARMONY_CHANNEL,
-                });
-            }
-        }
-    }
-
-    timeline
-}
-
-type TrackEvents = BTreeMap<usize, Vec<midly::TrackEventKind<'static>>>;
-
-fn to_smf(timeline: &Timeline) -> midly::Smf<'static> {
-    let mut tracks: Vec<TrackEvents> = vec![TrackEvents::new(); usize::from(timeline.staves)];
-
-    for (&tick, &bps) in &timeline.tempos {
-        if bps <= 0.0 {
-            continue;
-        }
-        let microseconds_per_quarter_note = (SECOND.as_micros() as f64 / bps).round() as u32;
-
-        tracks[0]
-            .entry(tick)
-            .or_default()
-            .push(midly::TrackEventKind::Meta(midly::MetaMessage::Tempo(
-                microseconds_per_quarter_note.into(),
-            )));
-    }
-
-    for note in &timeline.notes {
-        let events = &mut tracks[usize::from(note.staff.max(1)) - 1];
-
-        if !note.tie_stop {
-            events
-                .entry(note.start)
-                .or_default()
-                .push(midly::TrackEventKind::Midi {
-                    channel: note.channel.into(),
-                    message: midly::MidiMessage::NoteOn {
-                        key: note.key.into(),
-                        vel: note.velocity.into(),
-                    },
-                });
-        }
-
-        if !note.tie_start {
-            events
-                .entry(note.end)
-                .or_default()
-                .push(midly::TrackEventKind::Midi {
-                    channel: note.channel.into(),
-                    message: midly::MidiMessage::NoteOff {
-                        key: note.key.into(),
-                        vel: note.off_velocity.into(),
-                    },
-                });
-        }
-    }
-
-    midly::Smf {
-        header: midly::Header {
-            format: midly::Format::Parallel,
-            timing: midly::Timing::Metrical(midly::num::u15::new(TICKS_PER_QUARTER_NOTE)),
-        },
-        tracks: tracks.into_iter().map(delta_encode).collect(),
-    }
-}
-
-fn delta_encode(events: TrackEvents) -> Vec<midly::TrackEvent<'static>> {
-    let mut track = vec![];
-
-    let mut prev = 0;
-    for (position, events) in events {
-        let mut delta = position - prev;
-        prev = position;
-
-        for kind in events {
-            track.push(midly::TrackEvent {
-                delta: (delta as u32).into(),
-                kind,
-            });
-            delta = 0;
-        }
-    }
-
-    track.push(midly::TrackEvent {
-        delta: 1.into(),
-        kind: midly::TrackEventKind::Meta(midly::MetaMessage::EndOfTrack),
-    });
-
-    track
-}
-
-/// Like MuseScore, tempos are rounded to 6 decimal places
-fn round_tempo(bps: f64) -> f64 {
-    let scale = 10f64.powi(6);
-    (bps * scale + 0.5).floor() / scale
-}
-
-fn to_ticks(quarters: f64) -> usize {
-    (quarters * TICKS_PER_QUARTER_NOTE_F64).round() as usize
-}
-
-const MIDI_FORTE_VELOCITY: f64 = 90.0;
-
-fn dynamics_to_velocity(dynamics: f64) -> u8 {
-    (dynamics / 100.0 * MIDI_FORTE_VELOCITY)
-        .round()
-        .clamp(0.0, 127.0) as u8
-}
-
-fn note_on_velocity(note: &musicxml::Note) -> u8 {
-    note.dynamics
-        .map(|dynamics| dynamics_to_velocity(dynamics).max(1))
-        .unwrap_or(DEFAULT_VELOCITY)
-}
-
-fn note_off_velocity(note: &musicxml::Note) -> u8 {
-    note.end_dynamics.map(dynamics_to_velocity).unwrap_or(0)
-}
-
-/// The parts of a regular or cue note
-struct FullNote<'a> {
-    chord: bool,
-    kind: &'a musicxml::NoteKindStatePitchKind,
-    duration: f64,
-    tie: &'a [musicxml::Tie],
-    /// Cue notes don't play
-    play: bool,
-}
-
-fn full_note(note: &musicxml::Note) -> Option<FullNote<'_>> {
-    match &note.kind {
-        musicxml::NoteKindState::Regular(msg) => Some(FullNote {
-            chord: msg.chord.is_some(),
-            kind: &msg.kind,
-            duration: msg.duration,
-            tie: &msg.tie,
-            play: true,
-        }),
-        musicxml::NoteKindState::Cue(msg) => Some(FullNote {
-            chord: msg.chord.is_some(),
-            kind: &msg.kind,
-            duration: msg.duration,
-            tie: &msg.tie,
-            play: false,
-        }),
-        musicxml::NoteKindState::Grace(_) | musicxml::NoteKindState::GraceCue(_) => None,
-    }
-}
-
-/// How much longer a note or rest with a fermata lasts
-fn fermata_stretch(note: &musicxml::Note) -> Option<f64> {
-    use musicxml::FermataShape;
-
-    note.notations
-        .iter()
-        .flat_map(|notations| &notations.fermata)
-        .map(|fermata| match fermata.shape {
-            FermataShape::DoubleAngled => 1.25,
-            FermataShape::Angled | FermataShape::HalfCurve => 1.5,
-            FermataShape::Normal | FermataShape::Curlew => 2.0,
-            FermataShape::Square | FermataShape::DoubleDot => 3.0,
-            FermataShape::DoubleSquare => 4.0,
-        })
-        .reduce(f64::max)
-}
-
-/// Returns `(start, stop)`, a note in the middle of a tie chain has both
-fn tie_kinds(ties: &[musicxml::Tie]) -> (bool, bool) {
-    let start = ties.iter().any(|t| t.kind == musicxml::StartStop::Start);
-    let stop = ties.iter().any(|t| t.kind == musicxml::StartStop::Stop);
-    (start, stop)
-}
-
-fn midi_note_number(step: musicxml::Step, octave: u8, alter: f64) -> u8 {
-    use musicxml::Step;
-    let base = match step {
-        Step::C => 0,
-        Step::D => 2,
-        Step::E => 4,
-        Step::F => 5,
-        Step::G => 7,
-        Step::A => 9,
-        Step::B => 11,
-    };
-
-    // No microtones for now
-    let alter = alter.round() as i32;
-
-    (((octave + 1) * 12 + base) as i32 + alter) as u8
-}
-
-type Reader<'a> = quick_xml::reader::Reader<&'a [u8]>;
 
 #[cfg(test)]
 mod tests {
     use quick_xml::events::Event;
 
     use super::*;
+    use crate::parsing::Reader;
 
     fn simple_xml_format(src: &str) -> String {
         let mut reader = Reader::from_str(src);
@@ -669,6 +230,8 @@ mod tests {
             </score-partwise>
         );
 
+        test_support::musescore_diff(&src);
+
         let midi = parse(&src, false).unwrap();
         insta::assert_debug_snapshot!(midi);
     }
@@ -806,6 +369,7 @@ mod tests {
     #[test]
     fn oddtaxi() {
         let src = std::fs::read_to_string("./schema/ODDTAXI.musicxml").unwrap();
+        test_support::musescore_diff(&src);
 
         let mut stream = parser::XmlStream::new("ODDTAXI.musicxml", &src);
 
@@ -873,6 +437,8 @@ mod tests {
         </score-partwise>
         );
 
+        test_support::musescore_diff(&src);
+
         let midi = parse(&src, false).unwrap();
         insta::assert_debug_snapshot!(midi);
     }
@@ -928,6 +494,8 @@ mod tests {
         </score-partwise>
         );
 
+        test_support::musescore_diff(&src);
+
         insta::assert_debug_snapshot!(parse(&src, false).unwrap());
         insta::assert_debug_snapshot!(
             "direction_offset_musescore_compat",
@@ -977,6 +545,8 @@ mod tests {
           </part>
         </score-partwise>
         );
+
+        test_support::musescore_diff(&src);
 
         insta::assert_debug_snapshot!(parse(&src, false).unwrap());
     }
@@ -1041,6 +611,8 @@ mod tests {
         </score-partwise>
         );
 
+        test_support::musescore_diff(&src);
+
         insta::assert_debug_snapshot!(parse(&src, false).unwrap());
         insta::assert_debug_snapshot!("harmony_musescore_compat", parse(&src, true).unwrap());
     }
@@ -1083,6 +655,8 @@ mod tests {
           </part>
         </score-partwise>
         );
+
+        test_support::musescore_diff(&src);
 
         let midi = parse(&src, false).unwrap();
         insta::assert_debug_snapshot!(midi);

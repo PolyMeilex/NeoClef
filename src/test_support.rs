@@ -1,4 +1,10 @@
-use std::{io::Read, path::PathBuf};
+use std::{
+    collections::BTreeMap,
+    hash::{DefaultHasher, Hash, Hasher},
+    io::Read,
+    path::PathBuf,
+    process::Command,
+};
 
 fn scores_dir() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("test-files/lib/scores")
@@ -350,4 +356,122 @@ fn container_rootfile_path(container_xml: &str) -> String {
             _ => {}
         }
     }
+}
+
+pub fn musescore_diff(src: &str) {
+    let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("target/musescore-test");
+    std::fs::create_dir_all(&dir).unwrap();
+
+    let mut hasher = DefaultHasher::new();
+    src.hash(&mut hasher);
+    let hash = format!("{:016x}", hasher.finish());
+    let xml = dir.join(format!("{hash}.musicxml"));
+    let mid = dir.join(format!("{hash}.mid"));
+
+    if !mid.exists() {
+        let installed = Command::new("flatpak")
+            .args(["info", "org.musescore.MuseScore"])
+            .output()
+            .is_ok_and(|output| output.status.success());
+        if !installed {
+            eprintln!("MuseScore isn't installed, skipping the MuseScore diff");
+            return;
+        }
+
+        std::fs::write(&xml, without_whitespace(src)).unwrap();
+        let exported = dir.join(format!("{hash}.export.mid"));
+        let status = Command::new("flatpak")
+            .arg("run")
+            .arg(format!("--filesystem={}", dir.display()))
+            .arg("org.musescore.MuseScore")
+            .arg("-o")
+            .arg(&exported)
+            .arg(&xml)
+            .output()
+            .unwrap()
+            .status;
+        assert!(
+            status.success(),
+            "MuseScore failed to export {xml:?} ({status}), its log in \
+             ~/.var/app/org.musescore.MuseScore/data/MuseScore/MuseScore4/logs/ says why"
+        );
+        std::fs::rename(&exported, &mid).unwrap();
+    }
+
+    let musescore_bytes = std::fs::read(&mid).unwrap();
+    let musescore = midly::Smf::parse(&musescore_bytes).unwrap();
+    let ours = crate::parse(src, true).unwrap();
+
+    assert_eq!(
+        musescore.header.timing, ours.header.timing,
+        "MuseScore exported at a different resolution"
+    );
+    let quarters = |tick: u64| tick as f64 / f64::from(crate::passes::TICKS_PER_QUARTER_NOTE);
+
+    let mut lines = Vec::new();
+    for track in 0..musescore.tracks.len().max(ours.tracks.len()) {
+        let musescore = starts_and_tempos(musescore.tracks.get(track));
+        let ours = starts_and_tempos(ours.tracks.get(track));
+
+        for ((tick, event), count) in &musescore {
+            for _ in ours.get(&(*tick, event.clone())).copied().unwrap_or(0)..*count {
+                lines.push((track, quarters(*tick), '-', event.clone()));
+            }
+        }
+        for ((tick, event), count) in &ours {
+            for _ in musescore.get(&(*tick, event.clone())).copied().unwrap_or(0)..*count {
+                lines.push((track, quarters(*tick), '+', event.clone()));
+            }
+        }
+    }
+
+    lines.sort_by(|a, b| a.partial_cmp(b).unwrap());
+    let lines: Vec<_> = lines
+        .iter()
+        .map(|(track, quarters, sign, event)| {
+            format!("track {track}: {sign} @{quarters:.4}q {event}")
+        })
+        .collect();
+    assert!(
+        lines.is_empty(),
+        "differs from MuseScore's export {mid:?} (- MuseScore only, + ours only):\n{}",
+        lines.join("\n")
+    );
+}
+
+fn without_whitespace(src: &str) -> Vec<u8> {
+    let mut reader = quick_xml::Reader::from_str(src);
+    reader.config_mut().trim_text(true);
+    let mut writer = quick_xml::Writer::new(Vec::new());
+    loop {
+        match reader.read_event().unwrap() {
+            quick_xml::events::Event::Eof => break,
+            event => writer.write_event(event).unwrap(),
+        }
+    }
+    writer.into_inner()
+}
+
+fn starts_and_tempos(track: Option<&Vec<midly::TrackEvent>>) -> BTreeMap<(u64, String), usize> {
+    let mut events = BTreeMap::new();
+    let mut tick = 0u64;
+
+    for event in track.into_iter().flatten() {
+        tick += u64::from(event.delta.as_int());
+
+        let description = match event.kind {
+            midly::TrackEventKind::Midi {
+                channel,
+                message: midly::MidiMessage::NoteOn { key, vel },
+            } if vel > 0 => format!("NoteOn ch={channel} key={key}"),
+            midly::TrackEventKind::Meta(midly::MetaMessage::Tempo(tempo)) => {
+                format!("Tempo({tempo})")
+            }
+            _ => continue,
+        };
+
+        *events.entry((tick, description)).or_default() += 1;
+    }
+
+    events
 }
