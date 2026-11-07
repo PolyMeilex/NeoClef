@@ -1,7 +1,7 @@
 ---
-source: src/main.rs
-assertion_line: 1134
-expression: "parse(src, false).unwrap()"
+source: src/lib.rs
+assertion_line: 715
+expression: "parse(&src, false).unwrap()"
 ---
 Smf {
     header: Header {
@@ -72,6 +72,42 @@ Smf {
                     ),
                     message: NoteOn {
                         key: u7(
+                            74,
+                        ),
+                        vel: u7(
+                            80,
+                        ),
+                    },
+                },
+            },
+            TrackEvent {
+                delta: u28(
+                    240,
+                ),
+                kind: Midi {
+                    channel: u4(
+                        0,
+                    ),
+                    message: NoteOff {
+                        key: u7(
+                            74,
+                        ),
+                        vel: u7(
+                            0,
+                        ),
+                    },
+                },
+            },
+            TrackEvent {
+                delta: u28(
+                    0,
+                ),
+                kind: Midi {
+                    channel: u4(
+                        0,
+                    ),
+                    message: NoteOn {
+                        key: u7(
                             64,
                         ),
                         vel: u7(
@@ -82,7 +118,61 @@ Smf {
             },
             TrackEvent {
                 delta: u28(
-                    480,
+                    0,
+                ),
+                kind: Midi {
+                    channel: u4(
+                        0,
+                    ),
+                    message: NoteOn {
+                        key: u7(
+                            77,
+                        ),
+                        vel: u7(
+                            80,
+                        ),
+                    },
+                },
+            },
+            TrackEvent {
+                delta: u28(
+                    120,
+                ),
+                kind: Midi {
+                    channel: u4(
+                        0,
+                    ),
+                    message: NoteOff {
+                        key: u7(
+                            77,
+                        ),
+                        vel: u7(
+                            0,
+                        ),
+                    },
+                },
+            },
+            TrackEvent {
+                delta: u28(
+                    0,
+                ),
+                kind: Midi {
+                    channel: u4(
+                        0,
+                    ),
+                    message: NoteOn {
+                        key: u7(
+                            79,
+                        ),
+                        vel: u7(
+                            80,
+                        ),
+                    },
+                },
+            },
+            TrackEvent {
+                delta: u28(
+                    120,
                 ),
                 kind: Midi {
                     channel: u4(
@@ -91,6 +181,24 @@ Smf {
                     message: NoteOff {
                         key: u7(
                             64,
+                        ),
+                        vel: u7(
+                            0,
+                        ),
+                    },
+                },
+            },
+            TrackEvent {
+                delta: u28(
+                    0,
+                ),
+                kind: Midi {
+                    channel: u4(
+                        0,
+                    ),
+                    message: NoteOff {
+                        key: u7(
+                            79,
                         ),
                         vel: u7(
                             0,
@@ -127,6 +235,42 @@ Smf {
                     message: NoteOff {
                         key: u7(
                             67,
+                        ),
+                        vel: u7(
+                            0,
+                        ),
+                    },
+                },
+            },
+            TrackEvent {
+                delta: u28(
+                    0,
+                ),
+                kind: Midi {
+                    channel: u4(
+                        0,
+                    ),
+                    message: NoteOn {
+                        key: u7(
+                            83,
+                        ),
+                        vel: u7(
+                            80,
+                        ),
+                    },
+                },
+            },
+            TrackEvent {
+                delta: u28(
+                    120,
+                ),
+                kind: Midi {
+                    channel: u4(
+                        0,
+                    ),
+                    message: NoteOff {
+                        key: u7(
+                            83,
                         ),
                         vel: u7(
                             0,
@@ -154,7 +298,7 @@ Smf {
             },
             TrackEvent {
                 delta: u28(
-                    480,
+                    360,
                 ),
                 kind: Midi {
                     channel: u4(
@@ -216,6 +360,114 @@ Smf {
                     ),
                     message: NoteOn {
                         key: u7(
+                            84,
+                        ),
+                        vel: u7(
+                            80,
+                        ),
+                    },
+                },
+            },
+            TrackEvent {
+                delta: u28(
+                    59,
+                ),
+                kind: Midi {
+                    channel: u4(
+                        0,
+                    ),
+                    message: NoteOff {
+                        key: u7(
+                            84,
+                        ),
+                        vel: u7(
+                            0,
+                        ),
+                    },
+                },
+            },
+            TrackEvent {
+                delta: u28(
+                    0,
+                ),
+                kind: Midi {
+                    channel: u4(
+                        0,
+                    ),
+                    message: NoteOn {
+                        key: u7(
+                            88,
+                        ),
+                        vel: u7(
+                            80,
+                        ),
+                    },
+                },
+            },
+            TrackEvent {
+                delta: u28(
+                    0,
+                ),
+                kind: Midi {
+                    channel: u4(
+                        0,
+                    ),
+                    message: NoteOn {
+                        key: u7(
+                            91,
+                        ),
+                        vel: u7(
+                            80,
+                        ),
+                    },
+                },
+            },
+            TrackEvent {
+                delta: u28(
+                    59,
+                ),
+                kind: Midi {
+                    channel: u4(
+                        0,
+                    ),
+                    message: NoteOff {
+                        key: u7(
+                            88,
+                        ),
+                        vel: u7(
+                            0,
+                        ),
+                    },
+                },
+            },
+            TrackEvent {
+                delta: u28(
+                    0,
+                ),
+                kind: Midi {
+                    channel: u4(
+                        0,
+                    ),
+                    message: NoteOff {
+                        key: u7(
+                            91,
+                        ),
+                        vel: u7(
+                            0,
+                        ),
+                    },
+                },
+            },
+            TrackEvent {
+                delta: u28(
+                    1,
+                ),
+                kind: Midi {
+                    channel: u4(
+                        0,
+                    ),
+                    message: NoteOn {
+                        key: u7(
                             76,
                         ),
                         vel: u7(
@@ -226,7 +478,7 @@ Smf {
             },
             TrackEvent {
                 delta: u28(
-                    720,
+                    601,
                 ),
                 kind: Midi {
                     channel: u4(
@@ -280,7 +532,79 @@ Smf {
             },
             TrackEvent {
                 delta: u28(
-                    480,
+                    0,
+                ),
+                kind: Midi {
+                    channel: u4(
+                        0,
+                    ),
+                    message: NoteOn {
+                        key: u7(
+                            81,
+                        ),
+                        vel: u7(
+                            80,
+                        ),
+                    },
+                },
+            },
+            TrackEvent {
+                delta: u28(
+                    240,
+                ),
+                kind: Midi {
+                    channel: u4(
+                        0,
+                    ),
+                    message: NoteOff {
+                        key: u7(
+                            81,
+                        ),
+                        vel: u7(
+                            0,
+                        ),
+                    },
+                },
+            },
+            TrackEvent {
+                delta: u28(
+                    240,
+                ),
+                kind: Midi {
+                    channel: u4(
+                        0,
+                    ),
+                    message: NoteOn {
+                        key: u7(
+                            83,
+                        ),
+                        vel: u7(
+                            80,
+                        ),
+                    },
+                },
+            },
+            TrackEvent {
+                delta: u28(
+                    240,
+                ),
+                kind: Midi {
+                    channel: u4(
+                        0,
+                    ),
+                    message: NoteOff {
+                        key: u7(
+                            83,
+                        ),
+                        vel: u7(
+                            0,
+                        ),
+                    },
+                },
+            },
+            TrackEvent {
+                delta: u28(
+                    0,
                 ),
                 kind: Midi {
                     channel: u4(
@@ -298,7 +622,7 @@ Smf {
             },
             TrackEvent {
                 delta: u28(
-                    480,
+                    240,
                 ),
                 kind: Midi {
                     channel: u4(

@@ -1,6 +1,6 @@
 use std::{
     collections::BTreeMap,
-    ops::{Add, AddAssign, Sub, SubAssign},
+    ops::{Add, AddAssign, Mul, Sub, SubAssign},
 };
 
 use crate::parsing::musicxml;
@@ -41,6 +41,21 @@ impl Time {
         Self(self.0.max(other.0))
     }
 
+    pub fn min(self, other: Self) -> Self {
+        Self(self.0.min(other.0))
+    }
+
+    /// How many times `other` fits in `self`
+    pub fn ratio(self, other: Self) -> f64 {
+        self.0 / other.0
+    }
+
+    /// Rounded down to whole ticks
+    pub fn floor_to_ticks(self) -> Self {
+        let ticks = f64::from(TICKS_PER_QUARTER_NOTE);
+        Self((self.0 * ticks).floor() / ticks)
+    }
+
     pub fn to_ticks(self) -> Tick {
         (self.0 * f64::from(TICKS_PER_QUARTER_NOTE))
             .round()
@@ -69,6 +84,14 @@ impl Sub for Time {
     }
 }
 
+impl Mul<f64> for Time {
+    type Output = Self;
+
+    fn mul(self, rhs: f64) -> Self {
+        Self(self.0 * rhs)
+    }
+}
+
 impl AddAssign for Time {
     fn add_assign(&mut self, rhs: Self) {
         self.0 += rhs.0;
@@ -88,6 +111,9 @@ pub struct Policy {
     pub harmony_offset_always_sounds: bool,
     /// A note's staff is its voice's home staff, not its `<staff>` (see `layout::VoiceStaves`)
     pub staff_from_voice: bool,
+    /// Appoggiaturas (unslashed graces) still delay their note but don't sound, as in
+    /// MuseScore's MIDI export
+    pub silent_appoggiaturas: bool,
 }
 
 impl Policy {
@@ -97,6 +123,7 @@ impl Policy {
             ignore_sound_offset: musescore_compat,
             harmony_offset_always_sounds: musescore_compat,
             staff_from_voice: musescore_compat,
+            silent_appoggiaturas: musescore_compat,
         }
     }
 }

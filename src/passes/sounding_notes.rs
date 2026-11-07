@@ -6,7 +6,12 @@ use crate::{
 pub fn sounding_notes(perf: &Performance) -> Vec<MidiNote> {
     perf.events
         .iter()
-        .filter(|event| event.kind == NoteKind::Regular)
+        .filter(|event| match event.kind {
+            NoteKind::Regular => true,
+            // `layout` gives graces it can't place no duration
+            NoteKind::Grace => event.off > event.on,
+            _ => false,
+        })
         .filter_map(|event| {
             let pitch = event.pitch.as_ref()?;
             Some(MidiNote {
@@ -86,7 +91,7 @@ mod tests {
     }
 
     #[test]
-    fn only_regular_notes_sound() {
+    fn regular_notes_and_placed_graces_sound() {
         use musicxml::Step;
 
         let perf = Performance {
@@ -94,7 +99,11 @@ mod tests {
                 event(NoteKind::Regular, pitch(Step::C, None, 4), None),
                 event(NoteKind::Regular, pitch(Step::F, Some(1.0), 3), Some(0.1)),
                 event(NoteKind::Cue, pitch(Step::C, None, 4), None),
-                event(NoteKind::Grace, pitch(Step::C, None, 4), None),
+                event(NoteKind::Grace, pitch(Step::D, None, 4), None),
+                PEvent {
+                    off: 0,
+                    ..event(NoteKind::Grace, pitch(Step::E, None, 4), None)
+                },
                 event(NoteKind::Rest, None, None),
                 event(NoteKind::Unpitched, None, None),
             ],
@@ -107,6 +116,13 @@ mod tests {
             .iter()
             .map(|note| (note.key, note.vel, note.off_vel))
             .collect();
-        assert_eq!(notes, [(60, DEFAULT_VELOCITY, 45), (54, 1, 45)]);
+        assert_eq!(
+            notes,
+            [
+                (60, DEFAULT_VELOCITY, 45),
+                (54, 1, 45),
+                (62, DEFAULT_VELOCITY, 45)
+            ]
+        );
     }
 }

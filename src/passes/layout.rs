@@ -18,13 +18,25 @@ pub fn layout(part: &musicxml::Part, policy: &Policy) -> Vec<MeasureIR> {
 
     let mut start = Time::ZERO;
     let mut voices = VoiceStaves::default();
+    let mut graces = Graces {
+        silent_appoggiaturas: policy.silent_appoggiaturas,
+        ..Graces::default()
+    };
 
     let mut laid: Vec<MeasureIR> = part
         .measure
         .iter()
         .enumerate()
         .map(|(index, content)| {
-            let laid = measure(index, content, start, &mut attributes, policy, &mut voices);
+            let laid = measure(
+                index,
+                content,
+                start,
+                &mut attributes,
+                policy,
+                &mut voices,
+                &mut graces,
+            );
             start = laid.start + laid.duration;
             laid
         })
@@ -51,6 +63,7 @@ fn measure<'a>(
     attributes: &mut Attributes,
     policy: &Policy,
     voice_staves: &mut VoiceStaves<'a>,
+    graces: &mut Graces<'a>,
 ) -> MeasureIR {
     let mut laid = MeasureIR {
         start,
@@ -61,6 +74,8 @@ fn measure<'a>(
 
     let mut cursor = Time::ZERO;
     let mut chord_at = Time::ZERO;
+    // How late the current chord sounds because of the appoggiaturas before it
+    let mut chord_delay = Time::ZERO;
     let mut voices = Vec::new();
 
     for (item, content) in measure.content.iter().enumerate() {
@@ -78,17 +93,22 @@ fn measure<'a>(
             }
             MeasureItem::Note(note) => {
                 let parts = NoteParts::new(note);
-                let dur = time(parts.duration);
+                let voice = note.voice.as_deref();
 
-                let at = if parts.kind == NoteKind::Grace {
-                    cursor
+                let (at, dur) = if parts.kind == NoteKind::Grace {
+                    // Placed by `graces.lead_into` once the note it leads into is known
+                    graces.wait(laid.notes.len(), note, parts.chord);
+                    (cursor, Time::ZERO)
                 } else if parts.chord {
-                    chord_at
+                    (chord_at + chord_delay, time(parts.duration) - chord_delay)
                 } else {
+                    let dur = time(parts.duration);
                     chord_at = cursor;
                     cursor += dur;
                     laid.duration = laid.duration.max(cursor);
-                    chord_at
+                    chord_delay = graces.lead_into(&mut laid.notes, voice, chord_at, dur);
+                    graces.set_previous(voice, note, parts.kind, dur);
+                    (chord_at + chord_delay, dur - chord_delay)
                 };
 
                 voices.push((
@@ -170,6 +190,8 @@ fn measure<'a>(
     }
 
     voice_staves.process_measure(&laid.notes, voices);
+    // Graces after the last note of a measure aren't supported, see `Graces`
+    graces.waiting.clear();
     laid
 }
 
@@ -255,6 +277,163 @@ impl<'a> Voice<'a> {
                 .map_or_else(|_| Self::Name(voice), Self::Number),
         }
     }
+}
+
+#[derive(Debug, Default)]
+struct Graces<'a> {
+    /// The graces waiting for the note they lead into
+    waiting: Vec<WaitingGrace>,
+    /// The notated duration of the previous chord in each voice, a rest clears it
+    previous: HashMap<Option<&'a str>, Time>,
+    /// See `Policy::silent_appoggiaturas`
+    silent_appoggiaturas: bool,
+}
+
+#[derive(Debug)]
+struct WaitingGrace {
+    /// Index in the measure's notes
+    index: usize,
+    /// Whether it starts a grace chord, `false` for its chord tones
+    starts_chord: bool,
+    notated: Time,
+    slash: bool,
+}
+
+impl<'a> Graces<'a> {
+    fn wait(&mut self, index: usize, note: &musicxml::Note, chord: bool) {
+        // Cue graces don't sound, so they don't take time from their note either
+        let musicxml::NoteKindState::Grace(state) = &note.kind else {
+            return;
+        };
+        let grace = &state.grace;
+        let slash = grace.slash == Some(true);
+
+        self.waiting.push(WaitingGrace {
+            index,
+            starts_chord: !chord,
+            // MuseScore reads a grace without a `<type>` as an eighth
+            notated: notated_duration(note).unwrap_or(Time::from_divisions(1.0, 2.0)),
+            slash,
+        });
+
+        // Like MuseScore, this grace and the ones before it are graces after the previous note
+        let steals_previous = grace.steal_time_previous.is_some() && !slash;
+        if grace.steal_time_following.is_none() && (steals_previous || ends_slur_or_trill(note)) {
+            self.waiting.clear();
+        }
+    }
+
+    fn set_previous(
+        &mut self,
+        voice: Option<&'a str>,
+        note: &musicxml::Note,
+        kind: NoteKind,
+        dur: Time,
+    ) {
+        if kind == NoteKind::Rest {
+            self.previous.remove(&voice);
+        } else {
+            self.previous
+                .insert(voice, notated_duration(note).unwrap_or(dur));
+        }
+    }
+
+    /// Places the waiting graces before the note at `at`, returns how late that note starts
+    fn lead_into(
+        &mut self,
+        notes: &mut [NoteEv],
+        voice: Option<&'a str>,
+        at: Time,
+        dur: Time,
+    ) -> Time {
+        let waiting = std::mem::take(&mut self.waiting);
+        let Some(first) = waiting.first() else {
+            return Time::ZERO;
+        };
+        let chords = waiting
+            .iter()
+            .filter(|grace| grace.starts_chord)
+            .count()
+            .max(1);
+
+        // When the first grace chord starts, how long each one lasts, and the note's delay
+        let (start, each, delay) = if first.slash {
+            let total = match self.previous.get(&voice) {
+                Some(&previous) => first.notated.min(previous * 0.5),
+                None => first.notated,
+            };
+            let each = (total * (1.0 / chords as f64)).floor_to_ticks();
+            (at - total, each, Time::ZERO)
+        } else {
+            // MuseScore works in whole thousandths of the note
+            let delay = (first.notated.ratio(dur) * 1000.0).floor().min(500.0);
+            let each = (delay / chords as f64).floor();
+            let thousandths = |n: f64| (dur * (n / 1000.0)).floor_to_ticks();
+            (at, thousandths(each), thousandths(delay))
+        };
+
+        // No duration, so `sounding_notes` leaves them out
+        let each = if !first.slash && self.silent_appoggiaturas {
+            Time::ZERO
+        } else {
+            each
+        };
+
+        let mut chord = 0;
+        for (i, grace) in waiting.iter().enumerate() {
+            if grace.starts_chord && i > 0 {
+                chord += 1;
+            }
+            let note = &mut notes[grace.index];
+            note.at = start + each * chord as f64;
+            note.dur = each;
+        }
+
+        delay
+    }
+}
+
+/// Whether a note ends a slur (without starting one) or a trill's wavy line
+fn ends_slur_or_trill(note: &musicxml::Note) -> bool {
+    use musicxml::{Ornament, StartStopContinue};
+
+    let slurs = || note.notations.iter().flat_map(|notations| &notations.slurs);
+    let slur_stops = slurs().any(|slur| slur.kind == StartStopContinue::Stop);
+    let slur_starts = slurs().any(|slur| slur.kind == StartStopContinue::Start);
+    let wavy_line_stops = note
+        .notations
+        .iter()
+        .flat_map(|notations| &notations.ornaments)
+        .flat_map(|ornaments| &ornaments.items)
+        .any(|ornament| {
+            matches!(ornament, Ornament::WavyLine(line) if line.kind == StartStopContinue::Stop)
+        });
+
+    (slur_stops && !slur_starts) || wavy_line_stops
+}
+
+/// The duration a note's `<type>` and `<dot>`s show, ignoring tuplets
+fn notated_duration(note: &musicxml::Note) -> Option<Time> {
+    let quarters = match note.note_type.as_deref()? {
+        "maxima" => 32.0,
+        "long" => 16.0,
+        "breve" => 8.0,
+        "whole" => 4.0,
+        "half" => 2.0,
+        "quarter" => 1.0,
+        "eighth" => 0.5,
+        "16th" => 0.25,
+        "32nd" => 0.125,
+        "64th" => 1.0 / 16.0,
+        "128th" => 1.0 / 32.0,
+        "256th" => 1.0 / 64.0,
+        "512th" => 1.0 / 128.0,
+        "1024th" => 1.0 / 256.0,
+        _ => return None,
+    };
+    // Each dot adds half of the previous value
+    let dotted = quarters * (2.0 - 0.5f64.powi(note.dot as i32));
+    Some(Time::from_divisions(dotted, 1.0))
 }
 
 /// MuseScore inspired voice to staff mapping
@@ -416,11 +595,12 @@ mod tests {
                 NoteKind::Rest
             ]
         );
+        // The grace (an appoggiatura, an eighth without a `<type>`) delays the unpitched note
         assert_eq!(
             notes(&measures[0]),
             [
-                (quarters(0.0), quarters(0.0)),
-                (quarters(0.0), quarters(1.0)),
+                (quarters(0.0), quarters(0.5)),
+                (quarters(0.5), quarters(0.5)),
                 (quarters(1.0), quarters(1.0)),
                 (quarters(3.0), quarters(1.0)),
             ]
