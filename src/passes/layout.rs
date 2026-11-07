@@ -1,3 +1,5 @@
+use std::collections::{BTreeMap, HashMap, HashSet};
+
 use crate::{
     parsing::musicxml::{self, MeasureItem},
     passes::{Control, MeasureIR, NoteEv, NoteId, NoteKind, Policy, TieFlags, Time},
@@ -15,23 +17,40 @@ pub fn layout(part: &musicxml::Part, policy: &Policy) -> Vec<MeasureIR> {
     };
 
     let mut start = Time::ZERO;
-    part.measure
+    let mut voices = VoiceStaves::default();
+
+    let mut laid: Vec<MeasureIR> = part
+        .measure
         .iter()
         .enumerate()
         .map(|(index, content)| {
-            let laid = measure(index, content, start, &mut attributes, policy);
+            let laid = measure(index, content, start, &mut attributes, policy, &mut voices);
             start = laid.start + laid.duration;
             laid
         })
-        .collect()
+        .collect();
+
+    if policy.staff_from_voice {
+        let home = voices.home_staves();
+        for (measure, voices) in laid.iter_mut().zip(&voices.notes) {
+            for (note, voice) in measure.notes.iter_mut().zip(voices) {
+                if let Some(&staff) = home.get(voice) {
+                    note.staff = staff;
+                }
+            }
+        }
+    }
+
+    laid
 }
 
-fn measure(
+fn measure<'a>(
     index: usize,
-    measure: &musicxml::Measure,
+    measure: &'a musicxml::Measure,
     start: Time,
     attributes: &mut Attributes,
     policy: &Policy,
+    voice_staves: &mut VoiceStaves<'a>,
 ) -> MeasureIR {
     let mut laid = MeasureIR {
         start,
@@ -42,6 +61,7 @@ fn measure(
 
     let mut cursor = Time::ZERO;
     let mut chord_at = Time::ZERO;
+    let mut voices = Vec::new();
 
     for (item, content) in measure.content.iter().enumerate() {
         let divisions = attributes.divisions;
@@ -71,6 +91,10 @@ fn measure(
                     chord_at
                 };
 
+                voices.push((
+                    Voice::new(note.voice.as_deref()),
+                    !parts.chord && parts.kind != NoteKind::Grace,
+                ));
                 laid.notes.push(NoteEv {
                     id: NoteId {
                         measure: index,
@@ -145,6 +169,7 @@ fn measure(
         }
     }
 
+    voice_staves.process_measure(&laid.notes, voices);
     laid
 }
 
@@ -212,6 +237,80 @@ fn fermata_stretch(note: &musicxml::Note) -> Option<f64> {
             FermataShape::DoubleSquare => 4.0,
         })
         .reduce(f64::max)
+}
+
+/// Even tho the spec says otherwise, a MusicXML voice `<voice>1</voice>` and `<voice>01</voice>` are usually treated as the same...
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+enum Voice<'a> {
+    Number(u64),
+    Name(&'a str),
+}
+
+impl<'a> Voice<'a> {
+    fn new(voice: Option<&'a str>) -> Self {
+        match voice.map(str::trim) {
+            None | Some("") => Self::Number(1),
+            Some(voice) => voice
+                .parse()
+                .map_or_else(|_| Self::Name(voice), Self::Number),
+        }
+    }
+}
+
+/// MuseScore inspired voice to staff mapping
+///
+/// MuseScore gives each voice of a part one home staff, the one it has the most chords and rests on
+#[derive(Debug, Default)]
+struct VoiceStaves<'a> {
+    /// The voice of each laid note, per measure
+    notes: Vec<Vec<Voice<'a>>>,
+    /// Chords and rests per voice and staff
+    counts: HashMap<Voice<'a>, BTreeMap<u8, usize>>,
+    overlapping: HashSet<Voice<'a>>,
+}
+
+impl<'a> VoiceStaves<'a> {
+    fn home_staves(&self) -> HashMap<Voice<'a>, u8> {
+        self.counts
+            .iter()
+            .filter(|(voice, _)| !self.overlapping.contains(voice))
+            .filter_map(|(voice, counts)| {
+                let max = counts.values().max()?;
+                let (&staff, _) = counts.iter().find(|(_, count)| *count == max)?;
+                Some((voice.clone(), staff))
+            })
+            .collect()
+    }
+
+    fn process_measure(&mut self, notes: &[NoteEv], voices: Vec<(Voice<'a>, bool)>) {
+        let mut spans: HashMap<&Voice, Vec<(u8, Time, Time)>> = HashMap::new();
+        for (note, (voice, counted)) in notes.iter().zip(&voices) {
+            if *counted && note.dur > Time::ZERO {
+                *self
+                    .counts
+                    .entry(voice.clone())
+                    .or_default()
+                    .entry(note.staff)
+                    .or_default() += 1;
+                spans
+                    .entry(voice)
+                    .or_default()
+                    .push((note.staff, note.at, note.at + note.dur));
+            }
+        }
+
+        for (voice, spans) in spans {
+            let overlaps = spans
+                .iter()
+                .any(|a| spans.iter().any(|b| a.0 != b.0 && a.1 < b.2 && b.1 < a.2));
+            if overlaps {
+                self.overlapping.insert(voice.clone());
+            }
+        }
+
+        self.notes
+            .push(voices.into_iter().map(|(voice, _)| voice).collect());
+    }
 }
 
 #[cfg(test)]
@@ -367,5 +466,43 @@ mod tests {
                 (quarters(1.0), Control::Tempo(80.0)),
             ]
         );
+    }
+
+    #[test]
+    fn cross_staff_notes_stay_on_their_voice_home_staff_if_musescore_compat() {
+        let on = |voice: u8, staff: u8, chord: &str| {
+            format!(
+                "<note>{chord}{C4}<duration>1</duration><voice>{voice}</voice><staff>{staff}</staff></note>"
+            )
+        };
+        // Voice 1 is mostly on staff 1 and crosses to staff 2. Voice 2 is mostly on staff 2,
+        // its chord tones and graces on staff 1 don't count. Voice 3 is on both staves at the
+        // same time, so it has no home staff.
+        let measure = format!(
+            "<measure number=\"1\"><attributes><staves>2</staves></attributes>
+               {}{}{}<backup><duration>3</duration></backup>
+               {}{}{}{}<backup><duration>2</duration></backup>
+               {}<backup><duration>1</duration></backup>{}
+             </measure>",
+            on(1, 1, ""),
+            on(1, 2, ""),
+            on(1, 1, ""),
+            on(2, 2, ""),
+            on(2, 1, "<chord/>"),
+            format_args!("<note><grace/>{C4}<voice>2</voice><staff>1</staff></note>"),
+            on(2, 2, ""),
+            on(3, 1, ""),
+            on(3, 2, ""),
+        );
+        let staves = |musescore_compat| -> Vec<u8> {
+            lay_out(&measure, musescore_compat)[0]
+                .notes
+                .iter()
+                .map(|note| note.staff)
+                .collect()
+        };
+
+        assert_eq!(staves(false), [1, 2, 1, 2, 1, 1, 2, 1, 2]);
+        assert_eq!(staves(true), [1, 1, 1, 2, 2, 2, 2, 1, 2]);
     }
 }

@@ -86,6 +86,8 @@ pub struct Policy {
     pub direction_offset_always_sounds: bool,
     pub ignore_sound_offset: bool,
     pub harmony_offset_always_sounds: bool,
+    /// A note's staff is its voice's home staff, not its `<staff>` (see `layout::VoiceStaves`)
+    pub staff_from_voice: bool,
 }
 
 impl Policy {
@@ -94,6 +96,7 @@ impl Policy {
             direction_offset_always_sounds: musescore_compat,
             ignore_sound_offset: musescore_compat,
             harmony_offset_always_sounds: musescore_compat,
+            staff_from_voice: musescore_compat,
         }
     }
 }
