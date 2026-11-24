@@ -181,21 +181,52 @@ fn measure<'a>(
                 }
             }
             MeasureItem::Direction(direction) => {
-                if let Some(sound) = direction.sound.as_ref()
-                    && let Some(tempo) = sound.tempo
-                {
+                let staff = direction
+                    .staff
+                    .filter(|staff| (1..=attributes.staves).contains(&u32::from(*staff)))
+                    .unwrap_or(1);
+                let direction_offset = direction
+                    .offset
+                    .as_ref()
+                    .filter(|offset| offset.sound || policy.direction_offset_always_sounds);
+
+                let pedals = direction
+                    .direction_type
+                    .iter()
+                    .filter_map(|kind| match kind {
+                        musicxml::DirectionType::Pedal(pedal) => Some(pedal),
+                        _ => None,
+                    });
+                for pedal in pedals {
+                    // A pedal mark has no `<sound>` of its own
+                    let offset = direction_offset.map_or(Time::ZERO, |offset| time(offset.value));
+                    laid.controls.push((
+                        cursor + offset,
+                        Control::Pedal {
+                            staff,
+                            number: pedal.number,
+                            kind: pedal.kind,
+                        },
+                    ));
+                }
+
+                if let Some(sound) = direction.sound.as_ref() {
                     let offset = sound
                         .offset
                         .as_ref()
                         .filter(|_| !policy.ignore_sound_offset)
-                        .or(direction
-                            .offset
-                            .as_ref()
-                            .filter(|offset| offset.sound || policy.direction_offset_always_sounds))
+                        .or(direction_offset)
                         .map_or(Time::ZERO, |offset| time(offset.value));
-
-                    laid.controls.push((cursor + offset, Control::Tempo(tempo)));
+                    self::sound(sound, cursor + offset, &mut laid.controls);
                 }
+            }
+            MeasureItem::Sound(sound) => {
+                let offset = sound
+                    .offset
+                    .as_ref()
+                    .filter(|_| !policy.ignore_sound_offset)
+                    .map_or(Time::ZERO, |offset| time(offset.value));
+                self::sound(sound, cursor + offset, &mut laid.controls);
             }
         }
     }
@@ -204,6 +235,13 @@ fn measure<'a>(
     // Graces after the last note of a measure aren't supported, see `Graces`
     graces.drop_waiting();
     laid
+}
+
+/// The tempo change of a `<sound>`
+fn sound(sound: &musicxml::Sound, at: Time, controls: &mut Vec<(Time, Control)>) {
+    if let Some(tempo) = sound.tempo {
+        controls.push((at, Control::Tempo(tempo)));
+    }
 }
 
 struct NoteParts<'a> {
@@ -626,6 +664,45 @@ mod tests {
                 (quarters(0.5), quarters(0.5)),
                 (quarters(1.0), quarters(1.0)),
                 (quarters(3.0), quarters(1.0)),
+            ]
+        );
+    }
+
+    #[test]
+    fn pedal_marks_go_to_their_staff() {
+        let measure = format!(
+            "<measure number=\"1\"><attributes><staves>2</staves></attributes>{}
+              <direction>
+                <direction-type><pedal type=\"start\" line=\"yes\"/></direction-type>
+                <staff>2</staff>
+              </direction>
+              <direction>
+                <direction-type><pedal type=\"stop\" number=\"2\"/></direction-type>
+                <offset sound=\"yes\">1</offset>
+              </direction>
+            </measure>",
+            note(C4, 1),
+        );
+
+        assert_eq!(
+            lay_out(&measure, false)[0].controls,
+            [
+                (
+                    quarters(1.0),
+                    Control::Pedal {
+                        staff: 2,
+                        number: 1,
+                        kind: musicxml::PedalType::Start,
+                    }
+                ),
+                (
+                    quarters(2.0),
+                    Control::Pedal {
+                        staff: 1,
+                        number: 2,
+                        kind: musicxml::PedalType::Stop,
+                    }
+                ),
             ]
         );
     }

@@ -51,9 +51,10 @@ pub fn parse_full(src: &str, musescore_compat: bool) -> Result<Conversion, Error
     passes::fermata(&mut perf);
     let mut notes = passes::sounding_notes(&perf);
     passes::chord_symbols(&perf, &mut notes);
+    let pedals = passes::pedals(&perf);
 
     Ok(Conversion {
-        smf: passes::encode(&perf.tempo, &notes),
+        smf: passes::encode(&perf.tempo, &notes, &pedals),
         unsupported,
     })
 }

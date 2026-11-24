@@ -1,15 +1,20 @@
 use std::{collections::BTreeMap, time::Duration};
 
-use crate::passes::{MidiNote, TICKS_PER_QUARTER_NOTE, Tick};
+use crate::passes::{MidiControl, MidiNote, TICKS_PER_QUARTER_NOTE, Tick};
 
 const SECOND: Duration = Duration::from_secs(1);
 
 type TrackEvents = BTreeMap<Tick, Vec<midly::TrackEventKind<'static>>>;
 
-pub fn encode(tempo: &BTreeMap<Tick, f64>, notes: &[MidiNote]) -> midly::Smf<'static> {
+pub fn encode(
+    tempo: &BTreeMap<Tick, f64>,
+    notes: &[MidiNote],
+    controls: &[MidiControl],
+) -> midly::Smf<'static> {
     let staves = notes
         .iter()
         .map(|note| note.staff)
+        .chain(controls.iter().map(|control| control.staff))
         .max()
         .unwrap_or(1)
         .max(1);
@@ -57,6 +62,19 @@ pub fn encode(tempo: &BTreeMap<Tick, f64>, notes: &[MidiNote]) -> midly::Smf<'st
                     },
                 });
         }
+    }
+
+    for control in controls {
+        tracks[control.staff.max(1) as usize - 1]
+            .entry(control.tick)
+            .or_default()
+            .push(midly::TrackEventKind::Midi {
+                channel: control.channel.into(),
+                message: midly::MidiMessage::Controller {
+                    controller: control.controller.into(),
+                    value: control.value.into(),
+                },
+            });
     }
 
     midly::Smf {
@@ -159,6 +177,7 @@ mod tests {
         let smf = encode(
             &BTreeMap::from([(0, 2.0)]),
             &[note(480, 960, 60, 1), note(0, 480, 60, 1)],
+            &[],
         );
 
         assert_eq!(
@@ -187,7 +206,7 @@ mod tests {
         let mut second = note(480, 960, 60, 1);
         second.tie.stop = true;
 
-        let smf = encode(&BTreeMap::new(), &[first, second]);
+        let smf = encode(&BTreeMap::new(), &[first, second], &[]);
 
         assert_eq!(
             kinds(&smf.tracks[0]),
@@ -204,9 +223,43 @@ mod tests {
 
     #[test]
     fn one_track_per_staff() {
-        let smf = encode(&BTreeMap::new(), &[note(0, 480, 60, 3)]);
+        let smf = encode(&BTreeMap::new(), &[note(0, 480, 60, 3)], &[]);
 
         assert_eq!(smf.tracks.len(), 3);
         assert_eq!(kinds(&smf.tracks[2])[..2], [(0, on(60)), (480, off(60))]);
+    }
+
+    #[test]
+    fn pedal_before_notes_within_a_tick() {
+        let pedal = |tick, value| MidiControl {
+            tick,
+            staff: 2,
+            channel: 0,
+            controller: 64,
+            value,
+        };
+        let smf = encode(
+            &BTreeMap::new(),
+            &[note(0, 480, 60, 2)],
+            &[pedal(480, 0), pedal(480, 127)],
+        );
+
+        let controller = |value: u8| midly::TrackEventKind::Midi {
+            channel: 0.into(),
+            message: midly::MidiMessage::Controller {
+                controller: 64.into(),
+                value: value.into(),
+            },
+        };
+        assert_eq!(smf.tracks.len(), 2);
+        assert_eq!(
+            kinds(&smf.tracks[1])[..4],
+            [
+                (0, on(60)),
+                (480, controller(0)),
+                (0, controller(127)),
+                (0, off(60)),
+            ]
+        );
     }
 }

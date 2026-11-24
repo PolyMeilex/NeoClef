@@ -763,6 +763,9 @@ impl<'a> ParseContent<'a> for Measure {
                 b"harmony" => {
                     content.push(MeasureItem::Harmony(stream.required(b"harmony")?));
                 }
+                b"sound" => {
+                    content.push(MeasureItem::Sound(stream.required(b"sound")?));
+                }
                 tag => {
                     let tag = tag.to_vec();
                     stream.required::<()>(&tag)?;
@@ -787,6 +790,7 @@ pub enum MeasureItem {
     Forward(Forward),
     Direction(Direction),
     Harmony(Harmony),
+    Sound(Sound),
 }
 
 /// https://w3c.github.io/musicxml/musicxml-reference/elements/print/
@@ -1696,6 +1700,7 @@ impl<'a> ParseContent<'a> for Harmony {
 pub struct Direction {
     pub direction_type: Vec<DirectionType>,
     pub offset: Option<Offset>,
+    pub staff: Option<u8>,
     pub sound: Option<Sound>,
 }
 
@@ -1710,7 +1715,7 @@ impl<'a> ParseContent<'a> for Direction {
         let _footnote = stream.optional::<()>(b"footnote")?;
         let _level = stream.optional::<()>(b"level")?;
         let _voice = stream.optional::<()>(b"voice")?;
-        let _staff = stream.optional::<()>(b"staff")?;
+        let staff = stream.optional(b"staff")?;
         let sound = stream.optional(b"sound")?;
         let _listening = stream.optional::<()>(b"listening")?;
 
@@ -1719,6 +1724,7 @@ impl<'a> ParseContent<'a> for Direction {
         Ok(Self {
             direction_type,
             offset,
+            staff,
             sound,
         })
     }
@@ -1945,6 +1951,9 @@ impl<'a> ParseContent<'a> for Metronome {
 #[derive(Debug)]
 pub struct Sound {
     pub tempo: Option<NonNegativeDecimal>,
+    pub damper_pedal: Option<YesNoNumber>,
+    pub soft_pedal: Option<YesNoNumber>,
+    pub sostenuto_pedal: Option<YesNoNumber>,
     pub offset: Option<Offset>,
 }
 
@@ -1955,10 +1964,16 @@ impl<'a> ParseContent<'a> for Sound {
         start: &BytesStart<'a>,
     ) -> Result<Self, parser::Error> {
         let mut tempo: Option<NonNegativeDecimal> = None;
+        let mut damper_pedal = None;
+        let mut soft_pedal = None;
+        let mut sostenuto_pedal = None;
 
         for attr in start.attributes().filter_map(|r| r.ok()) {
             match attr.key.as_ref() {
                 b"tempo" => tempo = parse_str_as(&attr.value),
+                b"damper-pedal" => damper_pedal = YesNoNumber::parse(&attr.value),
+                b"soft-pedal" => soft_pedal = YesNoNumber::parse(&attr.value),
+                b"sostenuto-pedal" => sostenuto_pedal = YesNoNumber::parse(&attr.value),
                 _ => {}
             }
         }
@@ -1975,7 +1990,31 @@ impl<'a> ParseContent<'a> for Sound {
 
         stream.skip_to_end(tag)?;
 
-        Ok(Self { tempo, offset })
+        Ok(Self {
+            tempo,
+            damper_pedal,
+            soft_pedal,
+            sostenuto_pedal,
+            offset,
+        })
+    }
+}
+
+/// https://w3c.github.io/musicxml/musicxml-reference/data-types/yes-no-number/
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum YesNoNumber {
+    Yes,
+    No,
+    Number(Decimal),
+}
+
+impl YesNoNumber {
+    fn parse(bytes: &[u8]) -> Option<Self> {
+        match bytes {
+            b"yes" => Some(Self::Yes),
+            b"no" => Some(Self::No),
+            other => parse_str_as(other).map(Self::Number),
+        }
     }
 }
 

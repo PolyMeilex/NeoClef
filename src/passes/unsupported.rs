@@ -42,8 +42,6 @@ pub enum UnsupportedFeature {
     DynamicsMarks,
     /// `<wedge>`
     Hairpins,
-    /// `<pedal>`
-    Pedal,
     /// `<harmony>` with multiple chords
     StackedChordSymbols,
     /// `<midi-instrument>`
@@ -110,8 +108,8 @@ pub fn unsupported(
                     match kind {
                         musicxml::DirectionType::Dynamics(_) => found.insert(F::DynamicsMarks),
                         musicxml::DirectionType::Wedge(_) => found.insert(F::Hairpins),
-                        musicxml::DirectionType::Pedal(_) => found.insert(F::Pedal),
-                        musicxml::DirectionType::Metronome(_)
+                        musicxml::DirectionType::Pedal(_)
+                        | musicxml::DirectionType::Metronome(_)
                         | musicxml::DirectionType::Words(_)
                         | musicxml::DirectionType::Other => {}
                     }
@@ -125,7 +123,8 @@ pub fn unsupported(
             MeasureItem::Print(_)
             | MeasureItem::Attributes(_)
             | MeasureItem::Backup(_)
-            | MeasureItem::Forward(_) => {}
+            | MeasureItem::Forward(_)
+            | MeasureItem::Sound(_) => {}
         }
     }
 }

@@ -9,6 +9,7 @@ mod chord_symbols;
 mod encode;
 mod fermata;
 mod layout;
+mod pedals;
 mod playback_order;
 mod sounding_notes;
 mod tempo;
@@ -19,6 +20,7 @@ pub use chord_symbols::chord_symbols;
 pub use encode::encode;
 pub use fermata::fermata;
 pub use layout::layout;
+pub use pedals::pedals;
 pub use playback_order::playback_order;
 pub use sounding_notes::sounding_notes;
 pub use tempo::tempo;
@@ -176,7 +178,31 @@ pub struct NoteEv {
 #[derive(Debug, Clone, PartialEq)]
 pub enum Control {
     Tempo(f64),
-    ChordSymbol { staff: u8, keys: Vec<u8> },
+    ChordSymbol {
+        staff: u8,
+        keys: Vec<u8>,
+    },
+    Pedal {
+        staff: u8,
+        number: musicxml::NumberLevel,
+        kind: musicxml::PedalType,
+    },
+}
+
+/// The piano pedals a `<pedal>` mark can press
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum PianoPedal {
+    Damper,
+    Sostenuto,
+}
+
+impl PianoPedal {
+    pub const fn controller(self) -> u8 {
+        match self {
+            Self::Damper => 64,
+            Self::Sostenuto => 66,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -223,6 +249,15 @@ pub struct MidiNote {
     pub tie: TieFlags,
     pub staff: u8,
     pub channel: u8,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct MidiControl {
+    pub tick: Tick,
+    pub staff: u8,
+    pub channel: u8,
+    pub controller: u8,
+    pub value: u8,
 }
 
 #[cfg(test)]
