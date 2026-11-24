@@ -13,6 +13,7 @@ mod playback_order;
 mod sounding_notes;
 mod tempo;
 mod unroll;
+mod unsupported;
 
 pub use chord_symbols::chord_symbols;
 pub use encode::encode;
@@ -22,6 +23,7 @@ pub use playback_order::playback_order;
 pub use sounding_notes::sounding_notes;
 pub use tempo::tempo;
 pub use unroll::unroll;
+pub use unsupported::{UnsupportedFeature, UnsupportedFeatures, unsupported};
 
 pub type Tick = usize;
 

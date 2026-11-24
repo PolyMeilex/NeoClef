@@ -10,6 +10,13 @@ use parsing::{musicxml, parser};
 use passes::Policy;
 
 pub use parser::Error as ParseError;
+pub use passes::{UnsupportedFeature, UnsupportedFeatures};
+
+#[derive(Debug)]
+pub struct Conversion {
+    pub smf: midly::Smf<'static>,
+    pub unsupported: UnsupportedFeatures,
+}
 
 #[derive(Debug, thiserror::Error, miette::Diagnostic)]
 pub enum Error {
@@ -21,6 +28,10 @@ pub enum Error {
 }
 
 pub fn parse(src: &str, musescore_compat: bool) -> Result<midly::Smf<'static>, Error> {
+    Ok(parse_full(src, musescore_compat)?.smf)
+}
+
+pub fn parse_full(src: &str, musescore_compat: bool) -> Result<Conversion, Error> {
     let score: musicxml::ScorePartwise =
         parser::XmlStream::new("score.musicxml", src).required(b"score-partwise")?;
     log::debug!("{score:#?}");
@@ -28,7 +39,10 @@ pub fn parse(src: &str, musescore_compat: bool) -> Result<midly::Smf<'static>, E
     let part = single_part(&score)?;
     let policy = Policy::new(musescore_compat);
 
-    let laid = passes::layout(part, &policy);
+    let mut unsupported = UnsupportedFeatures::default();
+    passes::unsupported(&score, part, &mut unsupported);
+
+    let laid = passes::layout(part, &policy, &mut unsupported);
     let order = passes::playback_order(&laid);
 
     let mut perf = passes::unroll(&laid, &order);
@@ -38,7 +52,10 @@ pub fn parse(src: &str, musescore_compat: bool) -> Result<midly::Smf<'static>, E
     let mut notes = passes::sounding_notes(&perf);
     passes::chord_symbols(&perf, &mut notes);
 
-    Ok(passes::encode(&perf.tempo, &notes))
+    Ok(Conversion {
+        smf: passes::encode(&perf.tempo, &notes),
+        unsupported,
+    })
 }
 
 fn single_part(score: &musicxml::ScorePartwise) -> Result<&musicxml::Part, Error> {
@@ -712,6 +729,8 @@ mod tests {
         </score-partwise>
         );
 
-        insta::assert_debug_snapshot!(parse(&src, false).unwrap());
+        let conversion = parse_full(&src, false).unwrap();
+        insta::assert_debug_snapshot!(conversion.smf);
+        insta::assert_debug_snapshot!("grace_cue_unsupported", conversion.unsupported);
     }
 }

@@ -1,0 +1,12 @@
+---
+source: src/lib.rs
+assertion_line: 734
+expression: conversion.unsupported
+---
+UnsupportedFeatures(
+    {
+        GracesAfterNote,
+        GraceTiming,
+        Trills,
+    },
+)

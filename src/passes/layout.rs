@@ -2,7 +2,10 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 
 use crate::{
     parsing::musicxml::{self, MeasureItem},
-    passes::{Control, MeasureIR, NoteEv, NoteId, NoteKind, Policy, TieFlags, Time},
+    passes::{
+        Control, MeasureIR, NoteEv, NoteId, NoteKind, Policy, TieFlags, Time, UnsupportedFeature,
+        UnsupportedFeatures,
+    },
 };
 
 struct Attributes {
@@ -10,7 +13,11 @@ struct Attributes {
     staves: u32,
 }
 
-pub fn layout(part: &musicxml::Part, policy: &Policy) -> Vec<MeasureIR> {
+pub fn layout(
+    part: &musicxml::Part,
+    policy: &Policy,
+    unsupported: &mut UnsupportedFeatures,
+) -> Vec<MeasureIR> {
     let mut attributes = Attributes {
         divisions: 1.0,
         staves: 1,
@@ -41,6 +48,10 @@ pub fn layout(part: &musicxml::Part, policy: &Policy) -> Vec<MeasureIR> {
             laid
         })
         .collect();
+
+    if graces.dropped {
+        unsupported.insert(UnsupportedFeature::GracesAfterNote);
+    }
 
     if policy.staff_from_voice {
         let home = voices.home_staves();
@@ -191,7 +202,7 @@ fn measure<'a>(
 
     voice_staves.process_measure(&laid.notes, voices);
     // Graces after the last note of a measure aren't supported, see `Graces`
-    graces.waiting.clear();
+    graces.drop_waiting();
     laid
 }
 
@@ -287,6 +298,8 @@ struct Graces<'a> {
     previous: HashMap<Option<&'a str>, Time>,
     /// See `Policy::silent_appoggiaturas`
     silent_appoggiaturas: bool,
+    /// Whether graces after a note were left out, see `UnsupportedFeature::GracesAfterNote`
+    dropped: bool,
 }
 
 #[derive(Debug)]
@@ -319,8 +332,14 @@ impl<'a> Graces<'a> {
         // Like MuseScore, this grace and the ones before it are graces after the previous note
         let steals_previous = grace.steal_time_previous.is_some() && !slash;
         if grace.steal_time_following.is_none() && (steals_previous || ends_slur_or_trill(note)) {
-            self.waiting.clear();
+            self.drop_waiting();
         }
+    }
+
+    /// Leaves out the waiting graces, they are graces after a note
+    fn drop_waiting(&mut self) {
+        self.dropped |= !self.waiting.is_empty();
+        self.waiting.clear();
     }
 
     fn set_previous(
@@ -502,7 +521,11 @@ mod tests {
         let parsed = XmlStream::new("test", &src)
             .required::<musicxml::Part>(b"part")
             .unwrap();
-        layout(&parsed, &Policy::new(musescore_compat))
+        layout(
+            &parsed,
+            &Policy::new(musescore_compat),
+            &mut UnsupportedFeatures::default(),
+        )
     }
 
     fn quarters(value: f64) -> Time {
