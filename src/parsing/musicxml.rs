@@ -1730,6 +1730,8 @@ pub enum DirectionType {
     Metronome(Metronome),
     Words(Vec<String>),
     Dynamics(Vec<Dynamics>),
+    Wedge(Wedge),
+    Pedal(Pedal),
     Other,
 }
 
@@ -1755,6 +1757,8 @@ impl<'a> ParseContent<'a> for DirectionType {
                 }
                 DirectionType::Dynamics(dynamics)
             }
+            Some(b"wedge") => DirectionType::Wedge(stream.required(b"wedge")?),
+            Some(b"pedal") => DirectionType::Pedal(stream.required(b"pedal")?),
             Some(other) => {
                 let other = other.to_vec();
                 stream.required::<()>(&other)?;
@@ -1766,6 +1770,148 @@ impl<'a> ParseContent<'a> for DirectionType {
         stream.skip_to_end(tag)?;
 
         Ok(this)
+    }
+}
+
+/// https://w3c.github.io/musicxml/musicxml-reference/elements/wedge/
+#[derive(Debug, Clone)]
+pub struct Wedge {
+    pub kind: WedgeType,
+    pub number: NumberLevel,
+    pub niente: bool,
+}
+
+impl<'a> ParseContent<'a> for Wedge {
+    fn parse(
+        stream: &mut XmlStream<'a>,
+        tag: &[u8],
+        start: &BytesStart<'a>,
+    ) -> Result<Self, parser::Error> {
+        let mut kind = None;
+        let mut number = 1;
+        let mut niente = false;
+        for attr in start.attributes().filter_map(|r| r.ok()) {
+            match attr.key.as_ref() {
+                b"type" => kind = WedgeType::parse(attr.value.as_ref()),
+                b"number" => number = parse_str_as(&attr.value).unwrap_or(1),
+                b"niente" => niente = parse_yes_no(&attr.value),
+                _ => {}
+            }
+        }
+
+        stream.skip_to_end(tag)?;
+
+        Ok(Self {
+            kind: kind.ok_or_else(|| {
+                stream.error(parser::ErrorKind::MissingElement("wedge/@type".into()))
+            })?,
+            number,
+            niente,
+        })
+    }
+}
+
+/// https://w3c.github.io/musicxml/musicxml-reference/data-types/wedge-type/
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum WedgeType {
+    Crescendo,
+    Diminuendo,
+    Stop,
+    Continue,
+}
+
+impl WedgeType {
+    fn parse(bytes: &[u8]) -> Option<Self> {
+        let v = match bytes {
+            b"crescendo" => WedgeType::Crescendo,
+            b"diminuendo" => WedgeType::Diminuendo,
+            b"stop" => WedgeType::Stop,
+            b"continue" => WedgeType::Continue,
+            other => {
+                error!("Unexpected wedge type: {other:?}");
+                return None;
+            }
+        };
+
+        Some(v)
+    }
+}
+
+/// https://w3c.github.io/musicxml/musicxml-reference/elements/pedal/
+#[derive(Debug, Clone)]
+pub struct Pedal {
+    pub kind: PedalType,
+    pub number: NumberLevel,
+    pub line: Option<bool>,
+    pub sign: Option<bool>,
+    pub abbreviated: Option<bool>,
+}
+
+impl<'a> ParseContent<'a> for Pedal {
+    fn parse(
+        stream: &mut XmlStream<'a>,
+        tag: &[u8],
+        start: &BytesStart<'a>,
+    ) -> Result<Self, parser::Error> {
+        let mut kind = None;
+        let mut number = 1;
+        let mut line = None;
+        let mut sign = None;
+        let mut abbreviated = None;
+        for attr in start.attributes().filter_map(|r| r.ok()) {
+            match attr.key.as_ref() {
+                b"type" => kind = PedalType::parse(attr.value.as_ref()),
+                b"number" => number = parse_str_as(&attr.value).unwrap_or(1),
+                b"line" => line = Some(parse_yes_no(&attr.value)),
+                b"sign" => sign = Some(parse_yes_no(&attr.value)),
+                b"abbreviated" => abbreviated = Some(parse_yes_no(&attr.value)),
+                _ => {}
+            }
+        }
+
+        stream.skip_to_end(tag)?;
+
+        Ok(Self {
+            kind: kind.ok_or_else(|| {
+                stream.error(parser::ErrorKind::MissingElement("pedal/@type".into()))
+            })?,
+            number,
+            line,
+            sign,
+            abbreviated,
+        })
+    }
+}
+
+/// https://w3c.github.io/musicxml/musicxml-reference/data-types/pedal-type/
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum PedalType {
+    Start,
+    Stop,
+    Sostenuto,
+    Change,
+    Continue,
+    Discontinue,
+    Resume,
+}
+
+impl PedalType {
+    fn parse(bytes: &[u8]) -> Option<Self> {
+        let v = match bytes {
+            b"start" => PedalType::Start,
+            b"stop" => PedalType::Stop,
+            b"sostenuto" => PedalType::Sostenuto,
+            b"change" => PedalType::Change,
+            b"continue" => PedalType::Continue,
+            b"discontinue" => PedalType::Discontinue,
+            b"resume" => PedalType::Resume,
+            other => {
+                error!("Unexpected pedal type: {other:?}");
+                return None;
+            }
+        };
+
+        Some(v)
     }
 }
 

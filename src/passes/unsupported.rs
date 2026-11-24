@@ -40,6 +40,10 @@ pub enum UnsupportedFeature {
     Staccato,
     /// `<dynamics>`
     DynamicsMarks,
+    /// `<wedge>`
+    Hairpins,
+    /// `<pedal>`
+    Pedal,
     /// `<harmony>` with multiple chords
     StackedChordSymbols,
     /// `<midi-instrument>`
@@ -102,12 +106,15 @@ pub fn unsupported(
                 }
             }
             MeasureItem::Direction(direction) => {
-                if direction
-                    .direction_type
-                    .iter()
-                    .any(|kind| matches!(kind, musicxml::DirectionType::Dynamics(_)))
-                {
-                    found.insert(F::DynamicsMarks);
+                for kind in &direction.direction_type {
+                    match kind {
+                        musicxml::DirectionType::Dynamics(_) => found.insert(F::DynamicsMarks),
+                        musicxml::DirectionType::Wedge(_) => found.insert(F::Hairpins),
+                        musicxml::DirectionType::Pedal(_) => found.insert(F::Pedal),
+                        musicxml::DirectionType::Metronome(_)
+                        | musicxml::DirectionType::Words(_)
+                        | musicxml::DirectionType::Other => {}
+                    }
                 }
             }
             MeasureItem::Harmony(harmony) => {
