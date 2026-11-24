@@ -1,0 +1,10 @@
+[package]
+name = "neoclef-dev-tool"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[dependencies]
+clap = { version = "4.6.10", features = ["derive"] }
+midly = "0.5.3"
+pretty_assertions = "1.4.1"
