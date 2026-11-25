@@ -49,6 +49,7 @@ pub fn parse_full(src: &str, musescore_compat: bool) -> Result<Conversion, Error
 
     passes::tempo(&mut perf);
     passes::fermata(&mut perf);
+    passes::rolled_chords(&mut perf);
     let mut notes = passes::sounding_notes(&perf);
     passes::chord_symbols(&perf, &mut notes);
     let pedals = passes::pedals(&perf);

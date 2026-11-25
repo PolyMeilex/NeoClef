@@ -39,7 +39,7 @@ fn dynamics_to_velocity(dynamics: f64) -> u8 {
         .clamp(0.0, 127.0) as u8
 }
 
-fn midi_note_number(pitch: &musicxml::Pitch) -> u8 {
+pub fn midi_note_number(pitch: &musicxml::Pitch) -> u8 {
     use musicxml::Step;
     let base = match pitch.step {
         Step::C => 0,
@@ -79,6 +79,7 @@ mod tests {
             dynamics,
             end_dynamics: Some(50.0),
             fermata: None,
+            roll: None,
         }
     }
 

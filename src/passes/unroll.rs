@@ -26,6 +26,7 @@ pub fn unroll(measures: &[MeasureIR], order: &[Visit]) -> Performance {
                 dynamics: note.dynamics,
                 end_dynamics: note.end_dynamics,
                 fermata: note.fermata,
+                roll: note.roll,
             };
             perf.end = perf.end.max(event.off);
             perf.events.push(event);
@@ -70,6 +71,7 @@ mod tests {
                     dynamics: None,
                     end_dynamics: None,
                     fermata: None,
+                    roll: None,
                 })
                 .collect(),
             controls: vec![(quarters(at_end(notes)), Control::Tempo(60.0))],

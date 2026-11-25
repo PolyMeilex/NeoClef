@@ -32,8 +32,6 @@ pub enum UnsupportedFeature {
     Tremolo,
     /// `<schleifer>`, `<haydn>`, `<other-ornament>`
     OtherOrnaments,
-    /// `<arpeggiate>`
-    Arpeggio,
     /// `<glissando>`, `<slide>`
     Glissando,
     /// `<staccato>`
@@ -162,10 +160,6 @@ fn note(note: &musicxml::Note, found: &mut UnsupportedFeatures) {
     for notations in &note.notations {
         if !notations.glissando.is_empty() || !notations.slide.is_empty() {
             found.insert(Feature::Glissando);
-        }
-
-        if !notations.arpeggiate.is_empty() {
-            found.insert(Feature::Arpeggio);
         }
 
         if !notations.dynamics.is_empty() {

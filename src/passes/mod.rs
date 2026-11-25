@@ -11,6 +11,7 @@ mod fermata;
 mod layout;
 mod pedals;
 mod playback_order;
+mod rolled_chords;
 mod sounding_notes;
 mod tempo;
 mod unroll;
@@ -22,6 +23,7 @@ pub use fermata::fermata;
 pub use layout::layout;
 pub use pedals::pedals;
 pub use playback_order::playback_order;
+pub use rolled_chords::rolled_chords;
 pub use sounding_notes::sounding_notes;
 pub use tempo::tempo;
 pub use unroll::unroll;
@@ -173,6 +175,16 @@ pub struct NoteEv {
     pub dynamics: Option<f64>,
     pub end_dynamics: Option<f64>,
     pub fermata: Option<f64>,
+    pub roll: Option<Roll>,
+}
+
+/// A note of a rolled chord (`<arpeggiate>`), simultaneous notes with the same `number` roll
+/// together, even across voices and staves
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Roll {
+    pub number: musicxml::NumberLevel,
+    /// Top note first
+    pub down: bool,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -222,6 +234,7 @@ pub struct PEvent {
     pub dynamics: Option<f64>,
     pub end_dynamics: Option<f64>,
     pub fermata: Option<f64>,
+    pub roll: Option<Roll>,
 }
 
 #[derive(Debug)]

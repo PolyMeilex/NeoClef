@@ -3,8 +3,8 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 use crate::{
     parsing::musicxml::{self, MeasureItem},
     passes::{
-        Control, MeasureIR, NoteEv, NoteId, NoteKind, Policy, TieFlags, Time, UnsupportedFeature,
-        UnsupportedFeatures,
+        Control, MeasureIR, NoteEv, NoteId, NoteKind, Policy, Roll, TieFlags, Time,
+        UnsupportedFeature, UnsupportedFeatures,
     },
 };
 
@@ -105,6 +105,10 @@ fn measure<'a>(
             MeasureItem::Note(note) => {
                 let parts = NoteParts::new(note);
                 let voice = note.voice.as_deref();
+                let id = NoteId {
+                    measure: index,
+                    item,
+                };
 
                 let (at, dur) = if parts.kind == NoteKind::Grace {
                     // Placed by `graces.lead_into` once the note it leads into is known
@@ -127,10 +131,7 @@ fn measure<'a>(
                     !parts.chord && parts.kind != NoteKind::Grace,
                 ));
                 laid.notes.push(NoteEv {
-                    id: NoteId {
-                        measure: index,
-                        item,
-                    },
+                    id,
                     at,
                     dur,
                     kind: parts.kind,
@@ -152,6 +153,7 @@ fn measure<'a>(
                     dynamics: note.dynamics,
                     end_dynamics: note.end_dynamics,
                     fermata: fermata_stretch(note),
+                    roll: roll(note).filter(|_| parts.kind != NoteKind::Grace),
                 });
             }
             MeasureItem::Backup(backup) => {
@@ -291,6 +293,17 @@ impl<'a> NoteParts<'a> {
             },
         }
     }
+}
+
+fn roll(note: &musicxml::Note) -> Option<Roll> {
+    note.notations
+        .iter()
+        .flat_map(|notations| &notations.arpeggiate)
+        .next()
+        .map(|arpeggiate| Roll {
+            number: arpeggiate.number,
+            down: arpeggiate.direction == Some(musicxml::UpDown::Down),
+        })
 }
 
 /// How much longer a note or rest with a fermata lasts

@@ -3081,7 +3081,9 @@ impl TopBottom {
 /// https://w3c.github.io/musicxml/musicxml-reference/elements/arpeggiate/
 #[derive(Debug, Clone)]
 pub struct Arpeggiate {
+    pub number: NumberLevel,
     pub direction: Option<UpDown>,
+    pub unbroken: Option<bool>,
 }
 
 impl<'a> ParseContent<'a> for Arpeggiate {
@@ -3090,16 +3092,25 @@ impl<'a> ParseContent<'a> for Arpeggiate {
         tag: &[u8],
         start: &BytesStart<'a>,
     ) -> Result<Self, parser::Error> {
+        let mut number = 1;
         let mut direction = None;
+        let mut unbroken = None;
         for attr in start.attributes().filter_map(|r| r.ok()) {
-            if attr.key.as_ref() == b"direction" {
-                direction = UpDown::parse(attr.value.as_ref());
+            match attr.key.as_ref() {
+                b"number" => number = parse_str_as(&attr.value).unwrap_or(1),
+                b"direction" => direction = UpDown::parse(attr.value.as_ref()),
+                b"unbroken" => unbroken = Some(parse_yes_no(&attr.value)),
+                _ => {}
             }
         }
 
         stream.skip_to_end(tag)?;
 
-        Ok(Self { direction })
+        Ok(Self {
+            number,
+            direction,
+            unbroken,
+        })
     }
 }
 

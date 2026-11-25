@@ -54,6 +54,7 @@ mod tests {
             dynamics: None,
             end_dynamics: None,
             fermata,
+            roll: None,
         }
     }
 
